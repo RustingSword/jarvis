@@ -1,0 +1,2 @@
+[console_scripts]
+jarvis = jarvis.__main__:main

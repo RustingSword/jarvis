@@ -1,0 +1,39 @@
+telegram:
+  token: "8317838346:AAEM-xA0v8OJlw3qJ8KkeJmVY6jTk5IAlXU"
+
+codex:
+  workspace_dir: "/home/nazgul/jarvis"
+  exec_path: "codex"
+  timeout_seconds: 120
+  max_retries: 2
+  retry_backoff_seconds: 0.5
+
+storage:
+  db_path: "~/.jarvis/jarvis.db"
+  session_dir: "~/.jarvis/sessions"
+
+logging:
+  level: "INFO"
+  file: "~/.jarvis/jarvis.log"
+  max_bytes: 10485760
+  backup_count: 5
+
+triggers:
+  scheduler:
+    - name: "daily_summary"
+      cron: "0 9 * * *"
+      chat_id: "YOUR_CHAT_ID"
+      message: "每日提醒：记得查看任务清单。"
+
+  monitors:
+    - name: "cpu_alert"
+      type: "cpu"
+      threshold: 80
+      interval_seconds: 60
+      chat_id: "YOUR_CHAT_ID"
+      enabled: true
+
+  webhook:
+    host: "0.0.0.0"
+    port: 8080
+    token: "CHANGE_ME"

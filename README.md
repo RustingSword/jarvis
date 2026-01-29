@@ -1,0 +1,185 @@
+# Jarvis - Telegram 个人助理 Agent
+
+基于 Codex SDK 的长期在线个人助理，通过 Telegram bot 进行双向通信，支持被动响应和主动推送。
+
+## 特性
+
+- 🤖 **智能对话**：基于 Codex CLI 的 AI 助手，支持上下文记忆
+- 📝 **任务管理**：添加、查看、完成任务
+- ⏰ **提醒系统**：定时提醒功能
+- 📊 **系统监控**：CPU、内存、磁盘、负载监控
+- 🔔 **主动推送**：定时任务、监控告警、Webhook 触发
+- 🔄 **会话管理**：独立会话、重置、压缩功能
+
+## 架构
+
+采用事件驱动架构，核心组件：
+- **Event Bus**：中央事件总线
+- **Telegram Bot Manager**：消息收发
+- **Codex Manager**：Codex CLI 封装和会话管理
+- **Trigger System**：定时任务、监控、Webhook
+- **Storage Layer**：SQLite + 文件存储
+
+详细设计见 [设计文档](docs/plans/2026-01-29-telegram-assistant-design.md)
+
+## 快速开始
+
+### 本地开发
+
+1. 安装依赖：
+   ```bash
+   pip install -e .
+   ```
+
+2. 配置：
+   ```bash
+   cp config.sample.yaml config.yaml
+   # 编辑 config.yaml，填入 Telegram Bot Token
+   ```
+
+3. 运行：
+   ```bash
+   python -m jarvis --config config.yaml
+   ```
+
+### VPS 部署
+
+使用一键安装脚本：
+
+```bash
+# 将代码上传到服务器
+git clone <YOUR_REPO> /opt/jarvis
+
+# 运行安装脚本
+sudo /opt/jarvis/scripts/install.sh
+
+# 编辑配置
+sudo nano /etc/jarvis/config.yaml
+sudo nano /etc/jarvis/jarvis.env
+
+# 重启服务
+sudo systemctl restart jarvis
+
+# 查看日志
+sudo journalctl -u jarvis -f
+```
+
+详细部署步骤见 [部署文档](docs/deploy.md)
+
+## 可用命令
+
+### 基础命令
+- `/start` - 启动助手
+- `/help` - 查看帮助
+- `/reset` - 重置会话
+- `/compact` - 压缩会话上下文
+
+### 任务管理
+- `/task add <描述>` - 添加任务
+- `/task list` - 查看任务列表
+- `/task done <id>` - 完成任务
+
+### 提醒功能
+- `/remind <YYYY-MM-DD HH:MM> <内容>` - 添加提醒
+- `/remind list` - 查看提醒列表
+- `/remind cancel <id>` - 取消提醒
+
+## 配置说明
+
+### config.yaml
+
+```yaml
+telegram:
+  token: "YOUR_BOT_TOKEN"  # Telegram Bot Token
+
+codex:
+  workspace_dir: "~/workspace"  # Codex 工作目录
+  exec_path: "codex"  # Codex CLI 路径
+  timeout_seconds: 120  # 超时时间
+
+storage:
+  db_path: "~/.jarvis/jarvis.db"  # 数据库路径
+  session_dir: "~/.jarvis/sessions"  # 会话存储目录
+
+triggers:
+  scheduler:
+    - name: "daily_summary"
+      cron: "0 9 * * *"  # 每天 9 点
+      action: "send_summary"
+
+  monitors:
+    - name: "cpu_alert"
+      type: "cpu"
+      threshold: 80  # CPU 使用率超过 80% 告警
+      interval: 60  # 检查间隔（秒）
+
+logging:
+  level: "INFO"
+  file: "/var/log/jarvis/jarvis.log"  # 日志文件（可选）
+```
+
+### 环境变量（.env）
+
+敏感信息建议通过环境变量配置：
+
+```bash
+TELEGRAM_BOT_TOKEN=your_token_here
+WEBHOOK_TOKEN=your_webhook_token
+JARVIS_LOG_FILE=/var/log/jarvis/jarvis.log
+```
+
+## 工具脚本
+
+- `scripts/install.sh` - 一键安装（创建用户、目录、venv、systemd 服务）
+- `scripts/run.sh` - 本地运行脚本
+- `scripts/smoke_test.sh` - 配置和存储测试
+
+## 技术栈
+
+- Python 3.11+
+- python-telegram-bot（异步版本）
+- Codex CLI（通过 subprocess 调用）
+- SQLite3 + aiosqlite
+- APScheduler（定时任务）
+- aiohttp（Webhook 服务器）
+- psutil（系统监控）
+
+## 项目结构
+
+```
+jarvis/
+├── jarvis/              # 主代码
+│   ├── app.py          # 应用主逻辑
+│   ├── event_bus.py    # 事件总线
+│   ├── config.py       # 配置管理
+│   ├── codex/          # Codex 管理
+│   ├── telegram/       # Telegram Bot
+│   ├── triggers/       # 触发器系统
+│   └── storage/        # 存储层
+├── docs/               # 文档
+├── scripts/            # 工具脚本
+├── deploy/             # 部署配置
+└── config.sample.yaml  # 配置示例
+```
+
+## 开发
+
+### 运行测试
+
+```bash
+./scripts/smoke_test.sh
+```
+
+### 代码检查
+
+```bash
+ruff check jarvis/
+```
+
+## 许可证
+
+MIT License
+
+## 贡献
+
+欢迎提交 Issue 和 Pull Request！

@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "jarvis-telegram-assistant"
+version = "0.1.0"
+description = "Telegram personal assistant agent powered by Codex CLI"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Jarvis" }]
+dependencies = [
+  "python-telegram-bot>=21.0",
+  "aiosqlite>=0.20.0",
+  "PyYAML>=6.0.1",
+  "APScheduler>=3.10.4",
+  "aiohttp>=3.9.5",
+  "psutil>=5.9.8",
+]
+
+[project.scripts]
+jarvis = "jarvis.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["jarvis*"]
+exclude = ["tests*", "docs*", "scripts*", "deploy*"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]

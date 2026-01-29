@@ -1,0 +1,24 @@
+[Unit]
+Description=Jarvis Telegram Assistant
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=jarvis
+Group=jarvis
+WorkingDirectory=/opt/jarvis
+EnvironmentFile=-/etc/jarvis/jarvis.env
+ExecStart=/opt/jarvis/.venv/bin/python -m jarvis --config /etc/jarvis/config.yaml
+Restart=on-failure
+RestartSec=5
+
+# Security hardening (adjust if needed)
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/var/log/jarvis /var/lib/jarvis /etc/jarvis
+
+[Install]
+WantedBy=multi-user.target
