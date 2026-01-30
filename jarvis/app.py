@@ -52,8 +52,13 @@ class JarvisApp:
 
         session = await self._storage.get_session(chat_id)
         session_id = session.thread_id if session else None
+
+        # 创建进度回调函数
+        async def progress_callback(codex_event: dict) -> None:
+            await self._handle_codex_progress(chat_id, codex_event)
+
         try:
-            result = await self._codex.run(text, session_id=session_id)
+            result = await self._codex.run(text, session_id=session_id, progress_callback=progress_callback)
         except CodexTimeoutError:
             logger.warning("Codex timed out")
             await self._event_bus.publish(
@@ -73,10 +78,212 @@ class JarvisApp:
             await self._storage.upsert_session(chat_id, result.thread_id)
 
         response_text = result.response_text or "(无可用回复)"
+        # 直接发送 Codex 返回的 markdown 内容
         await self._event_bus.publish(
             "telegram.send_message",
-            {"chat_id": chat_id, "text": response_text},
+            {"chat_id": chat_id, "text": response_text, "markdown": True},
         )
+
+    async def _handle_codex_progress(self, chat_id: str, event: dict) -> None:
+        """处理 Codex 进度事件，发送有价值的信息到 Telegram"""
+        event_type = event.get("type")
+
+        # 处理 event_msg 类型的事件
+        if event_type == "event_msg":
+            payload = event.get("payload", {})
+            msg_type = payload.get("type")
+
+            # AI 思考过程（未加密的）
+            if msg_type == "agent_reasoning":
+                reasoning_text = payload.get("text", "")
+                if reasoning_text:
+                    # 简化思考内容
+                    summary = self._summarize_reasoning(reasoning_text)
+                    if summary:
+                        final_text = f"💭 思考\n{self._as_blockquote(summary)}"
+                        await self._event_bus.publish(
+                            "telegram.send_message",
+                            {"chat_id": chat_id, "text": final_text, "markdown": True},
+                        )
+
+        # 处理 response_item 类型的事件
+        elif event_type == "response_item":
+            payload = event.get("payload", {})
+            item_type = payload.get("type")
+
+            # 工具调用
+            if item_type == "function_call":
+                tool_name = payload.get("name", "")
+                arguments = payload.get("arguments", "")
+
+                # 格式化工具调用信息
+                tool_display = self._format_tool_call(tool_name, arguments)
+                await self._event_bus.publish(
+                    "telegram.send_message",
+                    {"chat_id": chat_id, "text": f"🔧 工具\n{tool_display}", "markdown": True},
+                )
+
+        # 处理 item.completed 事件（兼容不同的 Codex 版本）
+        elif event_type == "item.completed":
+            item = event.get("item", {})
+            item_type = item.get("type")
+
+            # 推理/思考过程
+            if item_type == "reasoning":
+                reasoning_text = ""
+                item_text = item.get("text")
+                if isinstance(item_text, str) and item_text:
+                    reasoning_text = item_text
+                if not reasoning_text:
+                    # 兼容旧格式：从 summary 数组中提取文本
+                    summary_list = item.get("summary", [])
+                    reasoning_texts = []
+                    for s in summary_list:
+                        if isinstance(s, dict) and s.get("type") == "summary_text":
+                            text = s.get("text", "")
+                            if text:
+                                reasoning_texts.append(text)
+                    if reasoning_texts:
+                        reasoning_text = "\n\n".join(reasoning_texts)
+
+                if reasoning_text:
+                    summary = self._summarize_reasoning(reasoning_text)
+                    if summary:
+                        final_text = f"💭 思考\n{self._as_blockquote(summary)}"
+                        await self._event_bus.publish(
+                            "telegram.send_message",
+                            {"chat_id": chat_id, "text": final_text, "markdown": True},
+                        )
+                else:
+                    # 如果没有文本内容，显示简单提示
+                    await self._event_bus.publish(
+                        "telegram.send_message",
+                        {"chat_id": chat_id, "text": "💭 _思考中_...", "markdown": True},
+                    )
+
+            # 命令执行
+            elif item_type == "command_execution":
+                command = item.get("command", "")
+                if command:
+                    command_block = f"```\n{command}\n```"
+                    await self._event_bus.publish(
+                        "telegram.send_message",
+                        {"chat_id": chat_id, "text": f"⚙️ 执行命令\n{command_block}", "markdown": True},
+                    )
+
+            # 工具使用
+            elif item_type == "tool_use":
+                tool_name = item.get("name", "")
+                tool_input = item.get("input", {})
+
+                if tool_name:
+                    # 格式化工具调用
+                    tool_display = self._format_tool_use(tool_name, tool_input)
+                    await self._event_bus.publish(
+                        "telegram.send_message",
+                        {"chat_id": chat_id, "text": f"🔧 工具\n{tool_display}", "markdown": True},
+                    )
+
+    def _summarize_reasoning(self, text: str) -> str:
+        """简化思考过程文本，提取关键信息"""
+        # 保留原始markdown格式，不做处理
+        return text
+
+    @staticmethod
+    def _as_blockquote(text: str) -> str:
+        lines = text.splitlines() or [text]
+        return "\n".join(f"> {line}" if line else ">" for line in lines)
+
+    def _format_tool_call(self, tool_name: str, arguments: str) -> str:
+        """格式化工具调用信息"""
+        import json
+
+        # 友好的工具名称映射
+        tool_map = {
+            "shell_command": "执行命令",
+            "read_file": "读取文件",
+            "write_file": "写入文件",
+            "edit_file": "编辑文件",
+            "list_directory": "列出目录",
+            "web_search": "网络搜索",
+            "browser_action": "浏览器操作",
+        }
+
+        tool_display = tool_map.get(tool_name, tool_name)
+
+        # 尝试解析参数以提取关键信息
+        try:
+            args = json.loads(arguments)
+
+            # 对于 shell_command，显示命令内容
+            if tool_name == "shell_command" and "command" in args:
+                cmd = args["command"]
+                if isinstance(cmd, list):
+                    cmd_str = " ".join(cmd)
+                else:
+                    cmd_str = str(cmd)
+
+                # 不截断，显示完整命令，用代码块包裹
+                return f"{tool_display}\n```\n{cmd_str}\n```"
+
+            # 对于文件操作，显示文件路径
+            elif "path" in args:
+                path = str(args["path"])
+                return f"{tool_display}\n{path}"
+            elif "file" in args:
+                file_path = str(args["file"])
+                return f"{tool_display}\n{file_path}"
+
+        except (json.JSONDecodeError, KeyError, TypeError):
+            pass
+
+        return tool_display
+
+    def _format_tool_use(self, tool_name: str, tool_input: dict) -> str:
+        """格式化工具使用信息（用于 item.completed 格式）"""
+        tool_map = {
+            "bash": "执行命令",
+            "read_file": "读取文件",
+            "write_file": "写入文件",
+            "edit_file": "编辑文件",
+            "list_files": "列出文件",
+            "web_search": "网络搜索",
+        }
+
+        tool_display = tool_map.get(tool_name, tool_name)
+
+        # 尝试提取关键信息
+        if tool_name == "bash" and "command" in tool_input:
+            cmd = tool_input["command"]
+            # 不截断，显示完整命令，用代码块包裹
+            return f"{tool_display}\n```\n{cmd}\n```"
+        elif "path" in tool_input:
+            path = str(tool_input["path"])
+            return f"{tool_display}\n{path}"
+        elif "query" in tool_input:
+            query = str(tool_input["query"])
+            return f"{tool_display}\n{query}"
+
+        return tool_display
+
+    def _format_command(self, command: str) -> str:
+        """格式化命令显示"""
+        if len(command) > 60:
+            return f"执行命令: {command[:57]}..."
+        return f"执行命令: {command}"
+
+    def _format_tool_name(self, tool_name: str) -> str:
+        """格式化工具名称为更友好的显示"""
+        tool_map = {
+            "shell_command": "执行命令",
+            "read_file": "读取文件",
+            "write_file": "写入文件",
+            "edit_file": "编辑文件",
+            "list_directory": "列出目录",
+            "web_search": "网络搜索",
+            "browser_action": "浏览器操作",
+        }
+        return tool_map.get(tool_name, f"使用工具: {tool_name}")
 
     async def _on_command(self, event) -> None:
         chat_id = event.payload.get("chat_id")
@@ -148,9 +355,16 @@ class JarvisApp:
             )
             return
         except CodexProcessError as exc:
+            error_msg = str(exc)
+            # 如果是 UTF-8 错误，提供更有用的提示
+            if "UTF-8" in error_msg:
+                error_msg = (
+                    "会话文件可能已损坏。建议使用 /reset 重置会话。\n"
+                    f"技术详情: {exc}"
+                )
             await self._event_bus.publish(
                 "telegram.send_message",
-                {"chat_id": chat_id, "text": f"会话压缩失败: {exc}"},
+                {"chat_id": chat_id, "text": f"会话压缩失败: {error_msg}"},
             )
             return
 

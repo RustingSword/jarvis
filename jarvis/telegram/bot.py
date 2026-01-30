@@ -3,7 +3,10 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from telegram import Update
+import telegramify_markdown
+from telegram import BotCommand, Update
+from telegram.constants import ParseMode
+from telegram.error import BadRequest
 from telegram.ext import Application, ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters
 
 from jarvis.config import TelegramConfig
@@ -33,6 +36,19 @@ class TelegramBot:
         self._app = app
         await app.initialize()
         await app.start()
+
+        # 设置 bot 命令列表，清除之前的所有命令
+        commands = [
+            BotCommand("start", "开始使用 Jarvis"),
+            BotCommand("help", "显示帮助信息"),
+            BotCommand("reset", "重置对话上下文"),
+            BotCommand("compact", "压缩对话历史"),
+            BotCommand("task", "创建或管理任务"),
+            BotCommand("remind", "设置提醒"),
+        ]
+        await app.bot.set_my_commands(commands)
+        logger.info("Telegram bot commands set")
+
         if app.updater:
             await app.updater.start_polling()
         logger.info("Telegram bot started")
@@ -95,4 +111,27 @@ class TelegramBot:
         text = event.payload.get("text")
         if not chat_id or not text:
             return
-        await self._app.bot.send_message(chat_id=chat_id, text=text)
+        parse_mode = event.payload.get("parse_mode")
+        use_markdown = event.payload.get("markdown", False)
+        raw_text = text
+        send_text = text
+        send_parse_mode = None
+        if parse_mode:
+            send_parse_mode = parse_mode
+        elif use_markdown:
+            # 使用 telegramify-markdown 转换为 MarkdownV2 格式
+            send_parse_mode = ParseMode.MARKDOWN_V2
+            send_text = telegramify_markdown.markdownify(text)
+            # 调试日志
+            logger.debug(f"Markdown conversion:\nOriginal: {text[:200]}\nConverted: {send_text[:200]}\nParse mode: {send_parse_mode}")
+        else:
+            # 不使用格式化，直接发送纯文本
+            send_parse_mode = None
+        try:
+            await self._app.bot.send_message(chat_id=chat_id, text=send_text, parse_mode=send_parse_mode)
+        except BadRequest as exc:
+            if send_parse_mode:
+                logger.warning("Failed to send Markdown message, retrying as plain text: %s", exc)
+                await self._app.bot.send_message(chat_id=chat_id, text=raw_text, parse_mode=None)
+            else:
+                raise

@@ -4,11 +4,14 @@ import asyncio
 import json
 import logging
 from dataclasses import dataclass
-from typing import Any, Iterable, List, Optional
+from typing import Any, Awaitable, Callable, Iterable, List, Optional
 
 from jarvis.config import CodexConfig
 
 logger = logging.getLogger(__name__)
+
+# 进度回调函数类型：接收事件字典
+ProgressCallback = Callable[[dict[str, Any]], Awaitable[None]]
 
 
 @dataclass(slots=True)
@@ -34,11 +37,16 @@ class CodexManager:
     def __init__(self, config: CodexConfig) -> None:
         self._config = config
 
-    async def run(self, prompt: str, session_id: str | None = None) -> CodexResult:
+    async def run(
+        self,
+        prompt: str,
+        session_id: str | None = None,
+        progress_callback: ProgressCallback | None = None,
+    ) -> CodexResult:
         last_error: Exception | None = None
         for attempt in range(self._config.max_retries + 1):
             try:
-                return await self._run_once(prompt, session_id=session_id)
+                return await self._run_once(prompt, session_id=session_id, progress_callback=progress_callback)
             except CodexTimeoutError as exc:
                 last_error = exc
                 if attempt >= self._config.max_retries:
@@ -51,8 +59,13 @@ class CodexManager:
                 await asyncio.sleep(self._backoff(attempt))
         raise CodexError("Codex execution failed") from last_error
 
-    async def _run_once(self, prompt: str, session_id: str | None = None) -> CodexResult:
-        cmd = [self._config.exec_path, "exec", "--json"]
+    async def _run_once(
+        self,
+        prompt: str,
+        session_id: str | None = None,
+        progress_callback: ProgressCallback | None = None,
+    ) -> CodexResult:
+        cmd = [self._config.exec_path, "exec", "--json", "--dangerously-bypass-approvals-and-sandbox"]
         if session_id:
             cmd.extend(["resume", session_id])
         cmd.append(prompt)
@@ -65,20 +78,31 @@ class CodexManager:
             stderr=asyncio.subprocess.PIPE,
         )
 
+        # 实时读取输出并调用回调
+        events: List[dict[str, Any]] = []
+        stderr_lines: List[str] = []
+
         try:
-            stdout, stderr = await asyncio.wait_for(
-                proc.communicate(), timeout=self._config.timeout_seconds
+            # 创建读取任务
+            stdout_task = asyncio.create_task(
+                self._read_stdout_with_callback(proc.stdout, events, progress_callback)
+            )
+            stderr_task = asyncio.create_task(self._read_stderr(proc.stderr, stderr_lines))
+
+            # 等待进程完成，带超时
+            await asyncio.wait_for(
+                asyncio.gather(stdout_task, stderr_task, proc.wait()),
+                timeout=self._config.timeout_seconds
             )
         except asyncio.TimeoutError as exc:
             proc.kill()
             await proc.wait()
             raise CodexTimeoutError("Codex timed out") from exc
 
-        stderr_text = stderr.decode(errors="ignore").strip() if stderr else ""
+        stderr_text = "\n".join(stderr_lines).strip()
         if stderr_text:
             logger.warning("Codex stderr: %s", stderr_text)
 
-        events = _parse_jsonl(stdout.decode(errors="ignore"))
         thread_id = _extract_thread_id(events)
         response_text = _extract_response_text(events)
 
@@ -86,6 +110,68 @@ class CodexManager:
             raise CodexProcessError(f"Codex exited with code {proc.returncode}: {stderr_text}")
 
         return CodexResult(thread_id=thread_id, response_text=response_text, events=events)
+
+    async def _read_stdout_with_callback(
+        self,
+        stdout: asyncio.StreamReader | None,
+        events: List[dict[str, Any]],
+        progress_callback: ProgressCallback | None,
+    ) -> None:
+        """实时读取 stdout 并解析 JSONL，调用回调函数"""
+        if not stdout:
+            return
+
+        buffer = b""
+        while True:
+            chunk = await stdout.read(8192)
+            if not chunk:
+                break
+            buffer += chunk
+            while b"\n" in buffer:
+                line, buffer = buffer.split(b"\n", 1)
+                line_str = line.decode(errors="ignore").strip()
+                if not line_str:
+                    continue
+                try:
+                    event = json.loads(line_str)
+                    events.append(event)
+
+                    # 如果有回调函数，调用它
+                    if progress_callback:
+                        try:
+                            await progress_callback(event)
+                        except Exception:
+                            logger.exception("Error in progress callback")
+                except json.JSONDecodeError:
+                    logger.debug("Skipping non-JSON line: %s", line_str)
+
+        tail = buffer.decode(errors="ignore").strip()
+        if tail:
+            try:
+                event = json.loads(tail)
+                events.append(event)
+                if progress_callback:
+                    try:
+                        await progress_callback(event)
+                    except Exception:
+                        logger.exception("Error in progress callback")
+            except json.JSONDecodeError:
+                logger.debug("Skipping non-JSON line: %s", tail)
+
+    async def _read_stderr(
+        self,
+        stderr: asyncio.StreamReader | None,
+        lines: List[str],
+    ) -> None:
+        """读取 stderr"""
+        if not stderr:
+            return
+
+        while True:
+            line = await stderr.readline()
+            if not line:
+                break
+            lines.append(line.decode(errors="ignore"))
 
     def _backoff(self, attempt: int) -> float:
         return self._config.retry_backoff_seconds * (2**attempt)
@@ -99,19 +185,6 @@ def _path(path: str):
     from pathlib import Path
 
     return Path(path).expanduser()
-
-
-def _parse_jsonl(payload: str) -> List[dict[str, Any]]:
-    events: List[dict[str, Any]] = []
-    for line in payload.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            events.append(json.loads(line))
-        except json.JSONDecodeError:
-            logger.debug("Skipping non-JSON line: %s", line)
-    return events
 
 
 def _extract_thread_id(events: Iterable[dict[str, Any]]) -> Optional[str]:
