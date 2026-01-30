@@ -130,7 +130,6 @@ class JarvisApp:
         await self._memory.connect()
         await self._triggers.start()
         await self._telegram.start()
-        await self._send_startup_message()
         self._message_worker_task = asyncio.create_task(self._message_worker(), name="message-worker")
         self._command_worker_task = asyncio.create_task(self._command_worker(), name="command-worker")
         await self._idle()
@@ -146,21 +145,6 @@ class JarvisApp:
         logger.info("Jarvis app running")
         stop_event = asyncio.Event()
         await stop_event.wait()
-
-    async def _send_startup_message(self) -> None:
-        message = (self._config.telegram.startup_message or "").strip()
-        chat_id_raw = (self._config.telegram.startup_chat_id or "").strip()
-        if not message or not chat_id_raw:
-            logger.info("Startup message skipped (missing chat_id or message)")
-            return
-        chat_ids = [item.strip() for item in chat_id_raw.split(",") if item.strip()]
-        for chat_id in chat_ids:
-            await self._send_message(
-                chat_id,
-                message,
-                with_separator=False,
-                with_session_prefix=False,
-            )
 
     async def _enqueue_message(self, event: Event) -> None:
         if self._bundle_wait_seconds <= 0:
@@ -475,7 +459,7 @@ class JarvisApp:
         await handler(chat_id, args)
 
     async def _cmd_start(self, chat_id: str, args: list[str]) -> None:
-        await self._send_markdown(chat_id, "Jarvis 已启动。输入消息即可对话。")
+        await self._send_markdown(chat_id, "你好，输入消息即可对话。")
 
     async def _cmd_help(self, chat_id: str, args: list[str]) -> None:
         await self._send_markdown(
@@ -483,7 +467,7 @@ class JarvisApp:
             "\n".join(
                 [
                     "**可用命令**",
-                    "- `/start` - 启动对话",
+                    "- `/start` - 开始对话",
                     "- `/help` - 显示帮助",
                     "- `/reset` - 重置当前对话上下文",
                     "- `/compact` - 压缩对话历史并重置",

@@ -128,9 +128,18 @@ class TelegramBot:
         try:
             await self._app.bot.send_message(chat_id=chat_id, text=send_text, parse_mode=send_parse_mode)
         except BadRequest as exc:
+            if _is_chat_not_found_error(exc):
+                logger.warning("Telegram chat not found (chat_id=%s); drop message.", chat_id)
+                return
             if send_parse_mode:
                 logger.warning("Failed to send Markdown message, retrying as plain text: %s", exc)
-                await self._app.bot.send_message(chat_id=chat_id, text=raw_text, parse_mode=None)
+                try:
+                    await self._app.bot.send_message(chat_id=chat_id, text=raw_text, parse_mode=None)
+                except BadRequest as retry_exc:
+                    if _is_chat_not_found_error(retry_exc):
+                        logger.warning("Telegram chat not found (chat_id=%s); drop message.", chat_id)
+                        return
+                    raise
             else:
                 raise
 
@@ -308,25 +317,36 @@ class TelegramBot:
         if not file_path.exists():
             logger.warning("Media file not found: %s", file_path)
             return
-        if kind == "photo":
-            await self._app.bot.send_photo(chat_id=chat_id, photo=file_path, caption=caption, parse_mode=parse_mode)
-            return
-        if kind == "video":
-            await self._app.bot.send_video(chat_id=chat_id, video=file_path, caption=caption, parse_mode=parse_mode)
-            return
-        if kind == "audio":
-            await self._app.bot.send_audio(chat_id=chat_id, audio=file_path, caption=caption, parse_mode=parse_mode)
-            return
-        if kind == "voice":
-            await self._app.bot.send_voice(chat_id=chat_id, voice=file_path, caption=caption, parse_mode=parse_mode)
-            return
-        if kind == "animation":
-            await self._app.bot.send_animation(chat_id=chat_id, animation=file_path, caption=caption, parse_mode=parse_mode)
-            return
-        if kind == "video_note":
-            await self._app.bot.send_video_note(chat_id=chat_id, video_note=file_path)
-            return
-        await self._app.bot.send_document(chat_id=chat_id, document=file_path, caption=caption, parse_mode=parse_mode)
+        try:
+            if kind == "photo":
+                await self._app.bot.send_photo(chat_id=chat_id, photo=file_path, caption=caption, parse_mode=parse_mode)
+                return
+            if kind == "video":
+                await self._app.bot.send_video(chat_id=chat_id, video=file_path, caption=caption, parse_mode=parse_mode)
+                return
+            if kind == "audio":
+                await self._app.bot.send_audio(chat_id=chat_id, audio=file_path, caption=caption, parse_mode=parse_mode)
+                return
+            if kind == "voice":
+                await self._app.bot.send_voice(chat_id=chat_id, voice=file_path, caption=caption, parse_mode=parse_mode)
+                return
+            if kind == "animation":
+                await self._app.bot.send_animation(
+                    chat_id=chat_id,
+                    animation=file_path,
+                    caption=caption,
+                    parse_mode=parse_mode,
+                )
+                return
+            if kind == "video_note":
+                await self._app.bot.send_video_note(chat_id=chat_id, video_note=file_path)
+                return
+            await self._app.bot.send_document(chat_id=chat_id, document=file_path, caption=caption, parse_mode=parse_mode)
+        except BadRequest as exc:
+            if _is_chat_not_found_error(exc):
+                logger.warning("Telegram chat not found (chat_id=%s); skip media: %s", chat_id, file_path)
+                return
+            raise
 
 
 _SAFE_FILENAME_RE = re.compile(r"[^A-Za-z0-9._-]+")
@@ -337,3 +357,7 @@ def _sanitize_filename(name: str | None) -> str:
         return ""
     sanitized = _SAFE_FILENAME_RE.sub("_", name).strip("._")
     return sanitized or "file"
+
+
+def _is_chat_not_found_error(exc: Exception) -> bool:
+    return "chat not found" in str(exc).lower()

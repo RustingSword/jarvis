@@ -84,7 +84,7 @@ sudo journalctl -u jarvis -f
 ## 可用命令
 
 ### 基础命令
-- `/start` - 启动助手
+- `/start` - 开始对话
 - `/help` - 查看帮助
 - `/reset` - 重置会话
 - `/compact` - 压缩会话上下文

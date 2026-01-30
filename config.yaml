@@ -1,7 +1,5 @@
 telegram:
   token: "8317838346:AAEM-xA0v8OJlw3qJ8KkeJmVY6jTk5IAlXU"
-  startup_chat_id: "YOUR_CHAT_ID"
-  startup_message: "Jarvis 已启动。"
   bundle_wait_seconds: 10
 
 codex:
@@ -37,7 +35,6 @@ triggers:
   scheduler:
     - name: "daily_summary"
       cron: "0 9 * * *"
-      chat_id: "YOUR_CHAT_ID"
       message: "每日提醒：记得查看任务清单。"
 
   monitors:
@@ -45,7 +42,6 @@ triggers:
       type: "cpu"
       threshold: 80
       interval_seconds: 60
-      chat_id: "YOUR_CHAT_ID"
       enabled: true
 
   webhook:

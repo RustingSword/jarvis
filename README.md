@@ -86,7 +86,7 @@ sudo journalctl -u jarvis -f
 ## 可用命令
 
 ### 基础命令
-- `/start` - 启动助手
+- `/start` - 开始对话
 - `/help` - 查看帮助
 - `/reset` - 重置会话
 - `/compact` - 压缩会话上下文
@@ -111,8 +111,6 @@ sudo journalctl -u jarvis -f
 ```yaml
 telegram:
   token: "YOUR_BOT_TOKEN"  # Telegram Bot Token
-  startup_chat_id: "YOUR_CHAT_ID"  # Jarvis 启动后发送消息的目标聊天
-  startup_message: "Jarvis 已启动。"  # 启动提示内容（为空则不发送）
 
 codex:
   workspace_dir: "~/workspace"  # Codex 工作目录
@@ -147,7 +145,6 @@ triggers:
   scheduler:
     - name: "daily_summary"
       cron: "0 9 * * *"  # 每天 9 点
-      chat_id: "YOUR_CHAT_ID"
       message: "每日提醒：记得查看任务清单。"
 
   monitors:
@@ -155,7 +152,6 @@ triggers:
       type: "cpu"
       threshold: 80  # CPU 使用率超过 80% 告警
       interval_seconds: 60  # 检查间隔（秒）
-      chat_id: "YOUR_CHAT_ID"
       enabled: true
 
   webhook:
@@ -179,8 +175,6 @@ skills:
 
 ```bash
 TELEGRAM_TOKEN=your_token_here
-TELEGRAM_STARTUP_CHAT_ID=your_chat_id_here  # 可用 TELEGRAM_CHAT_ID 作为兜底
-TELEGRAM_STARTUP_MESSAGE=Jarvis started.
 
 CODEX_WORKSPACE_DIR=~/workspace
 CODEX_EXEC_PATH=codex

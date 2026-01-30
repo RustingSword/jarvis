@@ -43,8 +43,6 @@ class TriggersConfig:
 @dataclass(slots=True)
 class TelegramConfig:
     token: str
-    startup_chat_id: str | None = None
-    startup_message: str | None = None
     media_dir: str = "~/.jarvis/telegram_media"
     bundle_wait_seconds: float = 10.0
 
@@ -144,8 +142,6 @@ def load_config(path: str | Path) -> AppConfig:
     app_config = AppConfig(
         telegram=TelegramConfig(
             token=_require(telegram_raw, "token"),
-            startup_chat_id=_optional_str(telegram_raw.get("startup_chat_id")),
-            startup_message=_optional_str(telegram_raw.get("startup_message")),
             media_dir=str(telegram_raw.get("media_dir") or "~/.jarvis/telegram_media"),
             bundle_wait_seconds=float(telegram_raw.get("bundle_wait_seconds", 10.0)),
         ),
@@ -181,12 +177,6 @@ def _apply_env_overrides(config: AppConfig) -> AppConfig:
     telegram_token = os.getenv("TELEGRAM_TOKEN")
     if telegram_token:
         config.telegram.token = telegram_token
-    startup_chat_id = os.getenv("TELEGRAM_STARTUP_CHAT_ID") or os.getenv("TELEGRAM_CHAT_ID")
-    if startup_chat_id:
-        config.telegram.startup_chat_id = startup_chat_id
-    startup_message = os.getenv("TELEGRAM_STARTUP_MESSAGE")
-    if startup_message:
-        config.telegram.startup_message = startup_message
 
     codex_workspace = os.getenv("CODEX_WORKSPACE_DIR")
     if codex_workspace:
