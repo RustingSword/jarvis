@@ -29,6 +29,8 @@ COMMAND_SPECS = (
     ("memory", "记忆搜索与写入"),
 )
 
+TELEGRAM_MESSAGE_MAX_CHARS = 4096
+
 
 class TelegramBot:
     def __init__(self, config: TelegramConfig, event_bus: EventBus) -> None:
@@ -125,7 +127,7 @@ class TelegramBot:
             # 不使用格式化，直接发送纯文本
             send_parse_mode = None
         try:
-            await self._app.bot.send_message(chat_id=chat_id, text=send_text, parse_mode=send_parse_mode)
+            await self._send_text_chunks(chat_id, send_text, send_parse_mode)
         except BadRequest as exc:
             if _is_chat_not_found_error(exc):
                 logger.warning("Telegram chat not found (chat_id=%s); drop message.", chat_id)
@@ -133,7 +135,7 @@ class TelegramBot:
             if send_parse_mode:
                 logger.warning("Failed to send Markdown message, retrying as plain text: %s", exc)
                 try:
-                    await self._app.bot.send_message(chat_id=chat_id, text=raw_text, parse_mode=None)
+                    await self._send_text_chunks(chat_id, raw_text, None)
                 except BadRequest as retry_exc:
                     if _is_chat_not_found_error(retry_exc):
                         logger.warning("Telegram chat not found (chat_id=%s); drop message.", chat_id)
@@ -141,6 +143,14 @@ class TelegramBot:
                     raise
             else:
                 raise
+
+    async def _send_text_chunks(self, chat_id: str, text: str, parse_mode: str | None) -> None:
+        if not self._app or not self._app.bot:
+            return
+        for chunk in _split_text(text, TELEGRAM_MESSAGE_MAX_CHARS):
+            if not chunk:
+                continue
+            await self._app.bot.send_message(chat_id=chat_id, text=chunk, parse_mode=parse_mode)
 
     def _register_handlers(self, app: Application) -> None:
         for command, _description in COMMAND_SPECS:
@@ -360,3 +370,27 @@ def _sanitize_filename(name: str | None) -> str:
 
 def _is_chat_not_found_error(exc: Exception) -> bool:
     return "chat not found" in str(exc).lower()
+
+
+def _split_text(text: str, max_chars: int) -> list[str]:
+    if not text:
+        return []
+    if len(text) <= max_chars:
+        return [text]
+    chunks: list[str] = []
+    buffer = ""
+    for line in text.splitlines(keepends=True):
+        if len(line) > max_chars:
+            if buffer:
+                chunks.append(buffer)
+                buffer = ""
+            for idx in range(0, len(line), max_chars):
+                chunks.append(line[idx : idx + max_chars])
+            continue
+        if len(buffer) + len(line) > max_chars:
+            chunks.append(buffer)
+            buffer = ""
+        buffer += line
+    if buffer:
+        chunks.append(buffer)
+    return chunks
