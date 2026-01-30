@@ -5,7 +5,8 @@ import json
 import logging
 import re
 from collections.abc import Awaitable, Callable
-from datetime import datetime, timedelta
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 
 from jarvis.codex import CodexError, CodexProcessError, CodexTimeoutError, CodexManager
 from jarvis.config import AppConfig, SkillSourceConfig, persist_skill_source
@@ -46,6 +47,42 @@ CommandHandler = Callable[[str, list[str]], Awaitable[None]]
 TriggerHandler = Callable[[dict], Awaitable[None]]
 
 
+@dataclass(slots=True)
+class PendingMessageBundle:
+    chat_id: str
+    user_id: str
+    text_parts: list[str] = field(default_factory=list)
+    attachments: list[dict] = field(default_factory=list)
+    last_message_id: int | None = None
+    media_group_id: str | None = None
+    flush_task: asyncio.Task | None = None
+
+    def add_payload(self, payload: dict) -> None:
+        text = (payload.get("text") or "").strip()
+        if text:
+            self.text_parts.append(text)
+        attachments = payload.get("attachments") or []
+        if attachments:
+            self.attachments.extend(list(attachments))
+        message_id = payload.get("message_id")
+        if isinstance(message_id, int):
+            self.last_message_id = message_id
+        media_group_id = payload.get("media_group_id")
+        if media_group_id:
+            self.media_group_id = str(media_group_id)
+
+    def build_payload(self) -> dict:
+        text = "\n".join(part for part in self.text_parts if part.strip())
+        return {
+            "chat_id": self.chat_id,
+            "user_id": self.user_id,
+            "text": text,
+            "message_id": self.last_message_id,
+            "media_group_id": self.media_group_id,
+            "attachments": list(self.attachments),
+            "bundle_count": len(self.text_parts) + len(self.attachments),
+        }
+
 class JarvisApp:
     def __init__(self, config: AppConfig) -> None:
         self._config = config
@@ -61,6 +98,9 @@ class JarvisApp:
         self._command_queue: asyncio.Queue[Event | None] = asyncio.Queue()
         self._message_worker_task: asyncio.Task | None = None
         self._command_worker_task: asyncio.Task | None = None
+        self._pending_bundles: dict[str, PendingMessageBundle] = {}
+        self._bundle_lock = asyncio.Lock()
+        self._bundle_wait_seconds = max(0.0, float(config.telegram.bundle_wait_seconds))
 
         self._command_handlers: dict[str, CommandHandler] = {
             "start": self._cmd_start,
@@ -123,10 +163,55 @@ class JarvisApp:
             )
 
     async def _enqueue_message(self, event: Event) -> None:
-        await self._message_queue.put(event)
+        if self._bundle_wait_seconds <= 0:
+            await self._message_queue.put(event)
+            return
+        await self._collect_message_bundle(event)
 
     async def _enqueue_command(self, event: Event) -> None:
         await self._command_queue.put(event)
+
+    def _bundle_key(self, payload: dict) -> str:
+        chat_id = payload.get("chat_id") or ""
+        user_id = payload.get("user_id") or ""
+        return f"{chat_id}:{user_id}"
+
+    async def _collect_message_bundle(self, event: Event) -> None:
+        payload = event.payload
+        chat_id = payload.get("chat_id")
+        if not chat_id:
+            return
+        key = self._bundle_key(payload)
+        async with self._bundle_lock:
+            bundle = self._pending_bundles.get(key)
+            if not bundle:
+                bundle = PendingMessageBundle(
+                    chat_id=str(chat_id),
+                    user_id=str(payload.get("user_id") or ""),
+                )
+                self._pending_bundles[key] = bundle
+            bundle.add_payload(payload)
+            if bundle.flush_task:
+                bundle.flush_task.cancel()
+            bundle.flush_task = asyncio.create_task(self._flush_bundle_after(key, self._bundle_wait_seconds))
+
+    async def _flush_bundle_after(self, key: str, delay: float) -> None:
+        try:
+            await asyncio.sleep(delay)
+        except asyncio.CancelledError:
+            return
+        await self._flush_bundle(key)
+
+    async def _flush_bundle(self, key: str) -> None:
+        async with self._bundle_lock:
+            bundle = self._pending_bundles.pop(key, None)
+        if not bundle:
+            return
+        if bundle.flush_task:
+            bundle.flush_task.cancel()
+        payload = bundle.build_payload()
+        event = Event(type=EVENT_TELEGRAM_MESSAGE, payload=payload, created_at=datetime.now(timezone.utc))
+        await self._message_queue.put(event)
 
     async def _message_worker(self) -> None:
         while True:
@@ -155,6 +240,7 @@ class JarvisApp:
                 self._command_queue.task_done()
 
     async def _stop_workers(self) -> None:
+        await self._flush_all_bundles()
         if self._message_worker_task:
             await self._message_queue.put(None)
         if self._command_worker_task:
@@ -166,10 +252,17 @@ class JarvisApp:
         self._message_worker_task = None
         self._command_worker_task = None
 
+    async def _flush_all_bundles(self) -> None:
+        async with self._bundle_lock:
+            keys = list(self._pending_bundles.keys())
+        for key in keys:
+            await self._flush_bundle(key)
+
     async def _handle_message(self, event: Event) -> None:
         chat_id = event.payload.get("chat_id")
         text = event.payload.get("text", "")
-        if not chat_id or not text:
+        attachments = list(event.payload.get("attachments") or [])
+        if not chat_id or (not text and not attachments):
             return
 
         await self._ensure_verbosity(chat_id)
@@ -181,7 +274,7 @@ class JarvisApp:
             await self._handle_codex_progress(chat_id, codex_event)
 
         try:
-            prompt = await self._augment_with_memory(text)
+            prompt = await self._build_prompt(text, attachments)
             result = await self._codex.run(prompt, session_id=thread_id, progress_callback=progress_callback)
         except CodexTimeoutError:
             logger.warning("Codex timed out")
@@ -217,6 +310,38 @@ class JarvisApp:
         lines.append("")
         lines.append("用户消息：")
         lines.append(text)
+        return "\n".join(lines)
+
+    async def _build_prompt(self, text: str, attachments: list[dict]) -> str:
+        base_text = text or ""
+        prompt = await self._augment_with_memory(base_text) if base_text else ""
+        if attachments:
+            attachments_text = self._format_attachments_prompt(attachments)
+            if prompt:
+                prompt = f"{prompt}\n\n{attachments_text}"
+            else:
+                prompt = f"用户未提供文本，仅提供了附件。\n\n{attachments_text}"
+        return prompt or base_text
+
+    @staticmethod
+    def _format_attachments_prompt(attachments: list[dict]) -> str:
+        lines = ["用户附件（请直接读取以下文件路径）："]
+        for idx, item in enumerate(attachments, start=1):
+            path = item.get("path") or item.get("file") or ""
+            if not path:
+                continue
+            meta_parts = []
+            item_type = item.get("type")
+            if item_type:
+                meta_parts.append(str(item_type))
+            file_name = item.get("file_name")
+            if file_name:
+                meta_parts.append(str(file_name))
+            mime_type = item.get("mime_type")
+            if mime_type:
+                meta_parts.append(str(mime_type))
+            meta = f" ({' / '.join(meta_parts)})" if meta_parts else ""
+            lines.append(f"{idx}. {path}{meta}")
         return "\n".join(lines)
 
     async def _handle_codex_progress(self, chat_id: str, event: dict) -> None:
@@ -967,6 +1092,21 @@ class JarvisApp:
 
     async def _send_markdown(self, chat_id: str, text: str, *, with_separator: bool = True) -> None:
         await self._send_message(chat_id, text, markdown=True, with_separator=with_separator)
+
+    async def _send_media(
+        self,
+        chat_id: str,
+        media: list[dict],
+        *,
+        text: str | None = None,
+        markdown: bool = False,
+    ) -> None:
+        payload = {"chat_id": chat_id, "media": media}
+        if text:
+            payload["text"] = text
+        if markdown:
+            payload["markdown"] = True
+        await self._event_bus.publish(EVENT_TELEGRAM_SEND, payload)
 
     async def _with_session_prefix(self, chat_id: str, text: str, *, with_separator: bool = True) -> str:
         session = await self._storage.get_session(chat_id)

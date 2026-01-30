@@ -45,6 +45,8 @@ class TelegramConfig:
     token: str
     startup_chat_id: str | None = None
     startup_message: str | None = None
+    media_dir: str = "~/.jarvis/telegram_media"
+    bundle_wait_seconds: float = 10.0
 
 
 @dataclass(slots=True)
@@ -144,6 +146,8 @@ def load_config(path: str | Path) -> AppConfig:
             token=_require(telegram_raw, "token"),
             startup_chat_id=_optional_str(telegram_raw.get("startup_chat_id")),
             startup_message=_optional_str(telegram_raw.get("startup_message")),
+            media_dir=str(telegram_raw.get("media_dir") or "~/.jarvis/telegram_media"),
+            bundle_wait_seconds=float(telegram_raw.get("bundle_wait_seconds", 10.0)),
         ),
         codex=CodexConfig(
             workspace_dir=_require(codex_raw, "workspace_dir"),
