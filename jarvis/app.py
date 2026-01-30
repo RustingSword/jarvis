@@ -58,6 +58,7 @@ class JarvisApp:
             "help": self._cmd_help,
             "reset": self._cmd_reset,
             "compact": self._cmd_compact,
+            "resume": self._cmd_resume,
             "task": self._cmd_task,
             "remind": self._cmd_remind,
         }
@@ -95,14 +96,14 @@ class JarvisApp:
             return
 
         session = await self._storage.get_session(chat_id)
-        session_id = session.thread_id if session else None
+        thread_id = session.thread_id if session else None
 
         # 创建进度回调函数
         async def progress_callback(codex_event: dict) -> None:
             await self._handle_codex_progress(chat_id, codex_event)
 
         try:
-            result = await self._codex.run(text, session_id=session_id, progress_callback=progress_callback)
+            result = await self._codex.run(text, session_id=thread_id, progress_callback=progress_callback)
         except CodexTimeoutError:
             logger.warning("Codex timed out")
             await self._send_message(chat_id, "Codex 调用超时，请稍后再试。")
@@ -122,6 +123,12 @@ class JarvisApp:
     async def _handle_codex_progress(self, chat_id: str, event: dict) -> None:
         """处理 Codex 进度事件，发送有价值的信息到 Telegram"""
         event_type = event.get("type")
+
+        if event_type == "thread.started":
+            thread_id = event.get("thread_id")
+            if thread_id:
+                await self._storage.upsert_session(chat_id, str(thread_id))
+            return
 
         if event_type == "event_msg":
             await self._handle_event_msg(chat_id, event.get("payload", {}))
@@ -210,7 +217,23 @@ class JarvisApp:
         await self._send_message(chat_id, "Jarvis 已启动。输入消息即可对话。")
 
     async def _cmd_help(self, chat_id: str, args: list[str]) -> None:
-        await self._send_message(chat_id, "可用命令: /start, /help, /reset, /compact, /task, /remind")
+        await self._send_message(
+            chat_id,
+            "\n".join(
+                [
+                    "可用命令:",
+                    "/start - 启动对话",
+                    "/help - 显示帮助",
+                    "/reset - 重置当前对话上下文",
+                    "/compact - 压缩对话历史并重置",
+                    "/resume <id> - 恢复历史会话（不带 id 会列出最近会话）",
+                    "/task add <描述> | /task list | /task done <id> - 任务管理",
+                    "/remind <YYYY-MM-DD HH:MM> <内容> | /remind list | /remind cancel <id> - 提醒",
+                    "",
+                    "提示：每条消息前会显示会话标识，如 > [12]。",
+                ]
+            ),
+        )
 
     async def _cmd_reset(self, chat_id: str, args: list[str]) -> None:
         await self._storage.clear_session(chat_id)
@@ -218,6 +241,26 @@ class JarvisApp:
 
     async def _cmd_compact(self, chat_id: str, args: list[str]) -> None:
         await self._handle_compact(chat_id)
+
+    async def _cmd_resume(self, chat_id: str, args: list[str]) -> None:
+        if not args or not args[0].isdigit():
+            sessions = await self._storage.list_sessions(chat_id, limit=5)
+            if not sessions:
+                await self._send_message(chat_id, "暂无可恢复的会话。")
+                return
+            lines = ["用法: /resume <id>", "最近会话:"]
+            for session in sessions:
+                ts = session.last_active.isoformat(sep=" ", timespec="minutes")
+                lines.append(f"- {session.session_id} (最后活动: {ts})")
+            await self._send_message(chat_id, "\n".join(lines))
+            return
+
+        session_id = int(args[0])
+        record = await self._storage.activate_session(chat_id, session_id)
+        if not record:
+            await self._send_message(chat_id, f"未找到会话 ID: {session_id}")
+            return
+        await self._send_message(chat_id, "已恢复会话。")
 
     async def _handle_compact(self, chat_id: str) -> None:
         session = await self._storage.get_session(chat_id)
@@ -450,7 +493,8 @@ class JarvisApp:
         markdown: bool = False,
         parse_mode: str | None = None,
     ) -> None:
-        payload = {"chat_id": chat_id, "text": text}
+        final_text = await self._with_session_prefix(chat_id, text)
+        payload = {"chat_id": chat_id, "text": final_text}
         if markdown:
             payload["markdown"] = True
         if parse_mode:
@@ -459,6 +503,17 @@ class JarvisApp:
 
     async def _send_markdown(self, chat_id: str, text: str) -> None:
         await self._send_message(chat_id, text, markdown=True)
+
+    async def _with_session_prefix(self, chat_id: str, text: str) -> str:
+        session = await self._storage.get_session(chat_id)
+        if not session:
+            return text
+        bare_prefix = f"[{session.session_id}]"
+        prefix = f"> {bare_prefix}"
+        stripped = text.lstrip()
+        if stripped.startswith(prefix) or stripped.startswith(bare_prefix):
+            return text
+        return f"{prefix}\n{text}"
 
 
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
