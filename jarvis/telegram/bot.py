@@ -45,7 +45,6 @@ class TelegramBot:
         app = ApplicationBuilder().token(self._config.token).build()
         self._register_handlers(app)
 
-        self._app = app
         await app.initialize()
         await app.start()
 
@@ -56,15 +55,20 @@ class TelegramBot:
 
         if app.updater:
             await app.updater.start_polling()
+        # 只有在完全启动后才暴露给发送路径，避免未初始化时发送报错
+        self._app = app
         logger.info("Telegram bot started")
 
     async def stop(self) -> None:
-        if not self._app:
+        app = self._app
+        # 先置空，避免停机过程中仍被发送路径使用
+        self._app = None
+        if not app:
             return
-        if self._app.updater:
-            await self._app.updater.stop()
-        await self._app.stop()
-        await self._app.shutdown()
+        if app.updater:
+            await app.updater.stop()
+        await app.stop()
+        await app.shutdown()
         logger.info("Telegram bot stopped")
 
     async def _handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -99,7 +103,7 @@ class TelegramBot:
         await self._event_bus.publish(TELEGRAM_COMMAND, payload)
 
     async def _on_send_message(self, event) -> None:
-        if not self._app or not self._app.bot:
+        if not self._is_app_ready():
             return
         chat_id = event.payload.get("chat_id")
         if not chat_id:
@@ -145,7 +149,7 @@ class TelegramBot:
             await self._send_media_items(chat_id, media_items, event.payload)
 
     async def _send_text_chunks(self, chat_id: str, text: str, parse_mode: str | None) -> None:
-        if not self._app or not self._app.bot:
+        if not self._is_app_ready():
             return
         for chunk in _split_text(text, TELEGRAM_MESSAGE_MAX_CHARS):
             if not chunk:
@@ -297,7 +301,7 @@ class TelegramBot:
             logger.exception("Failed to create media dir: %s", self._media_dir)
 
     async def _send_media_items(self, chat_id: str, media_items: list[dict[str, Any]], payload: dict) -> None:
-        if not self._app or not self._app.bot:
+        if not self._is_app_ready():
             return
         for item in media_items:
             path = item.get("path") or item.get("file")
@@ -320,7 +324,7 @@ class TelegramBot:
         caption: str | None = None,
         parse_mode: str | None = None,
     ) -> None:
-        if not self._app or not self._app.bot:
+        if not self._is_app_ready():
             return
         file_path = Path(path)
         if not file_path.exists():
@@ -356,6 +360,16 @@ class TelegramBot:
                 logger.warning("Telegram chat not found (chat_id=%s); skip media: %s", chat_id, file_path)
                 return
             raise
+
+    def _is_app_ready(self) -> bool:
+        app = self._app
+        if not app or not app.bot:
+            return False
+        if not getattr(app, "_initialized", False):
+            return False
+        if not app.running:
+            return False
+        return True
 
 
 _SAFE_FILENAME_RE = re.compile(r"[^A-Za-z0-9._-]+")
