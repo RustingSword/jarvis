@@ -126,6 +126,17 @@ class Storage:
             );
             """
         )
+        await self._conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS settings (
+                chat_id TEXT NOT NULL,
+                key TEXT NOT NULL,
+                value TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (chat_id, key)
+            );
+            """
+        )
         await self._conn.commit()
 
     async def close(self) -> None:
@@ -508,6 +519,40 @@ class Storage:
             )
             for row in rows
         ]
+
+    async def get_setting(self, chat_id: str, key: str) -> str | None:
+        conn = self._require_conn()
+        async with conn.execute(
+            "SELECT value FROM settings WHERE chat_id = ? AND key = ?",
+            (chat_id, key),
+        ) as cursor:
+            row = await cursor.fetchone()
+        if not row:
+            return None
+        return str(row[0])
+
+    async def set_setting(self, chat_id: str, key: str, value: str) -> None:
+        conn = self._require_conn()
+        now = datetime.now(timezone.utc).isoformat()
+        await conn.execute(
+            """
+            INSERT INTO settings (chat_id, key, value, updated_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(chat_id, key) DO UPDATE SET
+                value = excluded.value,
+                updated_at = excluded.updated_at
+            """,
+            (chat_id, key, value, now),
+        )
+        await conn.commit()
+
+    async def delete_setting(self, chat_id: str, key: str) -> None:
+        conn = self._require_conn()
+        await conn.execute(
+            "DELETE FROM settings WHERE chat_id = ? AND key = ?",
+            (chat_id, key),
+        )
+        await conn.commit()
 
     def _require_conn(self) -> aiosqlite.Connection:
         if not self._conn:

@@ -18,6 +18,9 @@ logging:
   max_bytes: 10485760
   backup_count: 5
 
+output:
+  verbosity: "compact"  # full: 输出工具调用与思考; compact: 仅输出思考和最终结果
+
 triggers:
   scheduler:
     - name: "daily_summary"
@@ -37,3 +40,11 @@ triggers:
     host: "0.0.0.0"
     port: 8080
     token: "CHANGE_ME"
+
+skills:
+  sources:
+    - name: "openai-curated"
+      type: "github"
+      repo: "openai/skills"
+      path: "skills/.curated"
+      ref: "main"
