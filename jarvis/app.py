@@ -55,6 +55,10 @@ class JarvisApp:
         self._triggers = TriggerManager(self._event_bus, self._storage, config.triggers)
         self._default_verbosity = (config.output.verbosity or "full").lower()
         self._verbosity_by_chat: dict[str, str] = {}
+        self._message_queue: asyncio.Queue[Event | None] = asyncio.Queue()
+        self._command_queue: asyncio.Queue[Event | None] = asyncio.Queue()
+        self._message_worker_task: asyncio.Task | None = None
+        self._command_worker_task: asyncio.Task | None = None
 
         self._command_handlers: dict[str, CommandHandler] = {
             "start": self._cmd_start,
@@ -74,19 +78,22 @@ class JarvisApp:
             "webhook": self._handle_webhook_trigger,
         }
 
-        self._event_bus.subscribe(EVENT_TELEGRAM_MESSAGE, self._on_message)
-        self._event_bus.subscribe(EVENT_TELEGRAM_COMMAND, self._on_command)
+        self._event_bus.subscribe(EVENT_TELEGRAM_MESSAGE, self._enqueue_message)
+        self._event_bus.subscribe(EVENT_TELEGRAM_COMMAND, self._enqueue_command)
         self._event_bus.subscribe(EVENT_TRIGGER_FIRED, self._on_trigger)
 
     async def start(self) -> None:
         await self._storage.connect()
         await self._triggers.start()
         await self._telegram.start()
+        self._message_worker_task = asyncio.create_task(self._message_worker(), name="message-worker")
+        self._command_worker_task = asyncio.create_task(self._command_worker(), name="command-worker")
         await self._idle()
 
     async def stop(self) -> None:
         await self._telegram.stop()
         await self._triggers.stop()
+        await self._stop_workers()
         await self._storage.close()
 
     async def _idle(self) -> None:
@@ -94,7 +101,51 @@ class JarvisApp:
         stop_event = asyncio.Event()
         await stop_event.wait()
 
-    async def _on_message(self, event: Event) -> None:
+    async def _enqueue_message(self, event: Event) -> None:
+        await self._message_queue.put(event)
+
+    async def _enqueue_command(self, event: Event) -> None:
+        await self._command_queue.put(event)
+
+    async def _message_worker(self) -> None:
+        while True:
+            event = await self._message_queue.get()
+            if event is None:
+                self._message_queue.task_done()
+                break
+            try:
+                await self._handle_message(event)
+            except Exception:
+                logger.exception("Message handling failed")
+            finally:
+                self._message_queue.task_done()
+
+    async def _command_worker(self) -> None:
+        while True:
+            event = await self._command_queue.get()
+            if event is None:
+                self._command_queue.task_done()
+                break
+            try:
+                await self._handle_command(event)
+            except Exception:
+                logger.exception("Command handling failed")
+            finally:
+                self._command_queue.task_done()
+
+    async def _stop_workers(self) -> None:
+        if self._message_worker_task:
+            await self._message_queue.put(None)
+        if self._command_worker_task:
+            await self._command_queue.put(None)
+
+        tasks = [task for task in (self._message_worker_task, self._command_worker_task) if task]
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        self._message_worker_task = None
+        self._command_worker_task = None
+
+    async def _handle_message(self, event: Event) -> None:
         chat_id = event.payload.get("chat_id")
         text = event.payload.get("text", "")
         if not chat_id or not text:
@@ -242,7 +293,7 @@ class JarvisApp:
 
         return tool_display
 
-    async def _on_command(self, event: Event) -> None:
+    async def _handle_command(self, event: Event) -> None:
         chat_id = event.payload.get("chat_id")
         command = event.payload.get("command")
         args = event.payload.get("args", [])
@@ -252,15 +303,15 @@ class JarvisApp:
         await self._ensure_verbosity(chat_id)
         handler = self._command_handlers.get(command)
         if not handler:
-            await self._send_message(chat_id, f"未知命令: {command}")
+            await self._send_markdown(chat_id, f"未知命令: `{command}`")
             return
         await handler(chat_id, args)
 
     async def _cmd_start(self, chat_id: str, args: list[str]) -> None:
-        await self._send_message(chat_id, "Jarvis 已启动。输入消息即可对话。")
+        await self._send_markdown(chat_id, "Jarvis 已启动。输入消息即可对话。")
 
     async def _cmd_help(self, chat_id: str, args: list[str]) -> None:
-        await self._send_message(
+        await self._send_markdown(
             chat_id,
             "\n".join(
                 [
@@ -283,7 +334,7 @@ class JarvisApp:
 
     async def _cmd_reset(self, chat_id: str, args: list[str]) -> None:
         await self._storage.clear_session(chat_id)
-        await self._send_message(chat_id, "会话已重置。")
+        await self._send_markdown(chat_id, "会话已重置。")
 
     async def _cmd_compact(self, chat_id: str, args: list[str]) -> None:
         await self._handle_compact(chat_id)
@@ -292,21 +343,21 @@ class JarvisApp:
         if not args or not args[0].isdigit():
             sessions = await self._storage.list_sessions(chat_id, limit=5)
             if not sessions:
-                await self._send_message(chat_id, "暂无可恢复的会话。")
+                await self._send_markdown(chat_id, "暂无可恢复的会话。")
                 return
             lines = ["用法: /resume <id>", "最近会话:"]
             for session in sessions:
                 ts = session.last_active.isoformat(sep=" ", timespec="minutes")
                 lines.append(f"- {session.session_id} (最后活动: {ts})")
-            await self._send_message(chat_id, "\n".join(lines))
+            await self._send_markdown(chat_id, "\n".join(lines))
             return
 
         session_id = int(args[0])
         record = await self._storage.activate_session(chat_id, session_id)
         if not record:
-            await self._send_message(chat_id, f"未找到会话 ID: {session_id}")
+            await self._send_markdown(chat_id, f"未找到会话 ID: `{session_id}`")
             return
-        await self._send_message(chat_id, "已恢复会话。")
+        await self._send_markdown(chat_id, "已恢复会话。")
 
     async def _cmd_verbosity(self, chat_id: str, args: list[str]) -> None:
         if not args:
@@ -342,7 +393,7 @@ class JarvisApp:
     async def _handle_compact(self, chat_id: str) -> None:
         session = await self._storage.get_session(chat_id)
         if not session:
-            await self._send_message(chat_id, "当前没有可压缩的会话。")
+            await self._send_markdown(chat_id, "当前没有可压缩的会话。")
             return
         try:
             summary_result = await self._codex.run(
@@ -351,7 +402,7 @@ class JarvisApp:
                 session_id=session.thread_id,
             )
         except CodexTimeoutError:
-            await self._send_message(chat_id, "会话压缩超时，请稍后再试。")
+            await self._send_markdown(chat_id, "会话压缩超时，请稍后再试。")
             return
         except CodexProcessError as exc:
             error_msg = str(exc)
@@ -361,12 +412,12 @@ class JarvisApp:
                     "会话文件可能已损坏。建议使用 /reset 重置会话。\n"
                     f"技术详情: {exc}"
                 )
-            await self._send_message(chat_id, f"会话压缩失败: {error_msg}")
+            await self._send_markdown(chat_id, f"会话压缩失败: {error_msg}")
             return
 
         summary = summary_result.response_text.strip()
         if not summary:
-            await self._send_message(chat_id, "未获取到摘要内容，压缩失败。")
+            await self._send_markdown(chat_id, "未获取到摘要内容，压缩失败。")
             return
 
         await self._storage.save_summary(chat_id, summary)
@@ -381,40 +432,40 @@ class JarvisApp:
         if seed_result and seed_result.thread_id:
             await self._storage.upsert_session(chat_id, seed_result.thread_id)
 
-        await self._send_message(chat_id, "会话已压缩并重置。")
+        await self._send_markdown(chat_id, "会话已压缩并重置。")
 
     async def _cmd_task(self, chat_id: str, args: list[str]) -> None:
         if not args:
-            await self._send_message(chat_id, "用法: /task add <描述> | /task list | /task done <id>")
+            await self._send_markdown(chat_id, "用法: /task add <描述> | /task list | /task done <id>")
             return
         action = args[0]
         if action == "add":
             description = " ".join(args[1:]).strip()
             if not description:
-                await self._send_message(chat_id, "请提供任务描述。")
+                await self._send_markdown(chat_id, "请提供任务描述。")
                 return
             task_id = await self._storage.add_task(chat_id, description, due_at=None)
-            await self._send_message(chat_id, f"任务已添加，ID: {task_id}")
+            await self._send_markdown(chat_id, f"任务已添加，ID: `{task_id}`")
             return
         if action == "list":
             tasks = await self._storage.list_tasks(chat_id)
             message = _format_tasks(tasks)
-            await self._send_message(chat_id, message)
+            await self._send_markdown(chat_id, message)
             return
         if action == "done":
             if len(args) < 2 or not args[1].isdigit():
-                await self._send_message(chat_id, "用法: /task done <id>")
+                await self._send_markdown(chat_id, "用法: /task done <id>")
                 return
             task_id = int(args[1])
             ok = await self._storage.complete_task(chat_id, task_id)
-            await self._send_message(chat_id, "任务已完成。" if ok else "未找到该任务。")
+            await self._send_markdown(chat_id, "任务已完成。" if ok else "未找到该任务。")
             return
 
-        await self._send_message(chat_id, "未知 task 子命令。")
+        await self._send_markdown(chat_id, "未知 task 子命令。")
 
     async def _cmd_remind(self, chat_id: str, args: list[str]) -> None:
         if not args:
-            await self._send_message(
+            await self._send_markdown(
                 chat_id,
                 "用法: /remind <YYYY-MM-DD HH:MM> <内容> | /remind list | /remind cancel <id>",
             )
@@ -423,20 +474,20 @@ class JarvisApp:
         if action == "list":
             reminders = await self._storage.list_reminders(chat_id)
             message = _format_reminders(reminders)
-            await self._send_message(chat_id, message)
+            await self._send_markdown(chat_id, message)
             return
         if action == "cancel":
             if len(args) < 2 or not args[1].isdigit():
-                await self._send_message(chat_id, "用法: /remind cancel <id>")
+                await self._send_markdown(chat_id, "用法: /remind cancel <id>")
                 return
             reminder_id = int(args[1])
             ok = await self._storage.delete_reminder(chat_id, reminder_id)
-            await self._send_message(chat_id, "提醒已取消。" if ok else "未找到该提醒。")
+            await self._send_markdown(chat_id, "提醒已取消。" if ok else "未找到该提醒。")
             return
 
         dt, message = _parse_remind_args(args)
         if not dt or not message:
-            await self._send_message(chat_id, "用法: /remind <YYYY-MM-DD HH:MM> <内容>")
+            await self._send_markdown(chat_id, "用法: /remind <YYYY-MM-DD HH:MM> <内容>")
             return
         reminder_id = await self._storage.add_reminder(chat_id, message, dt, None)
         reminder = ReminderRecord(
@@ -447,7 +498,7 @@ class JarvisApp:
             repeat_interval_seconds=None,
         )
         await self._triggers.schedule_reminder(reminder)
-        await self._send_message(chat_id, f"提醒已设置，ID: {reminder_id}")
+        await self._send_markdown(chat_id, f"提醒已设置，ID: `{reminder_id}`")
 
     async def _cmd_skills(self, chat_id: str, args: list[str]) -> None:
         if not args:
