@@ -104,9 +104,6 @@ class TelegramBot:
         chat_id = event.payload.get("chat_id")
         if not chat_id:
             return
-        media_items = event.payload.get("media") or event.payload.get("attachments") or []
-        if media_items:
-            await self._send_media_items(chat_id, media_items, event.payload)
         text = event.payload.get("text")
         if not text:
             return
@@ -143,6 +140,9 @@ class TelegramBot:
                     raise
             else:
                 raise
+        media_items = event.payload.get("media") or event.payload.get("attachments") or []
+        if media_items:
+            await self._send_media_items(chat_id, media_items, event.payload)
 
     async def _send_text_chunks(self, chat_id: str, text: str, parse_mode: str | None) -> None:
         if not self._app or not self._app.bot:
