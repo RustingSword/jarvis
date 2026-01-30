@@ -116,14 +116,12 @@ class Storage:
             self._conn = None
 
     async def get_session(self, chat_id: str) -> Optional[SessionRecord]:
-        if not self._conn:
-            raise RuntimeError("Storage not connected")
-        cursor = await self._conn.execute(
+        conn = self._require_conn()
+        async with conn.execute(
             "SELECT chat_id, thread_id, created_at, last_active FROM sessions WHERE chat_id = ?",
             (chat_id,),
-        )
-        row = await cursor.fetchone()
-        await cursor.close()
+        ) as cursor:
+            row = await cursor.fetchone()
         if not row:
             return None
         return SessionRecord(
@@ -134,10 +132,9 @@ class Storage:
         )
 
     async def upsert_session(self, chat_id: str, thread_id: str) -> None:
-        if not self._conn:
-            raise RuntimeError("Storage not connected")
+        conn = self._require_conn()
         now = datetime.now(timezone.utc).isoformat()
-        await self._conn.execute(
+        await conn.execute(
             """
             INSERT INTO sessions (chat_id, thread_id, created_at, last_active)
             VALUES (?, ?, ?, ?)
@@ -147,13 +144,12 @@ class Storage:
             """,
             (chat_id, thread_id, now, now),
         )
-        await self._conn.commit()
+        await conn.commit()
 
     async def clear_session(self, chat_id: str) -> None:
-        if not self._conn:
-            raise RuntimeError("Storage not connected")
-        await self._conn.execute("DELETE FROM sessions WHERE chat_id = ?", (chat_id,))
-        await self._conn.commit()
+        conn = self._require_conn()
+        await conn.execute("DELETE FROM sessions WHERE chat_id = ?", (chat_id,))
+        await conn.commit()
 
     async def save_summary(self, chat_id: str, summary: str) -> str:
         self._session_dir.mkdir(parents=True, exist_ok=True)
@@ -163,25 +159,23 @@ class Storage:
         return str(path)
 
     async def add_task(self, chat_id: str, description: str, due_at: datetime | None) -> int:
-        if not self._conn:
-            raise RuntimeError("Storage not connected")
+        conn = self._require_conn()
         created_at = datetime.now(timezone.utc).isoformat()
         due_value = due_at.isoformat() if due_at else None
-        cursor = await self._conn.execute(
+        cursor = await conn.execute(
             """
             INSERT INTO tasks (chat_id, description, status, created_at, due_at)
             VALUES (?, ?, ?, ?, ?)
             """,
             (chat_id, description, "open", created_at, due_value),
         )
-        await self._conn.commit()
+        await conn.commit()
         return cursor.lastrowid
 
     async def list_tasks(self, chat_id: str, status: str | None = None) -> list[TaskRecord]:
-        if not self._conn:
-            raise RuntimeError("Storage not connected")
+        conn = self._require_conn()
         if status:
-            cursor = await self._conn.execute(
+            cursor = await conn.execute(
                 """
                 SELECT id, chat_id, description, status, created_at, due_at
                 FROM tasks WHERE chat_id = ? AND status = ?
@@ -190,7 +184,7 @@ class Storage:
                 (chat_id, status),
             )
         else:
-            cursor = await self._conn.execute(
+            cursor = await conn.execute(
                 """
                 SELECT id, chat_id, description, status, created_at, due_at
                 FROM tasks WHERE chat_id = ?
@@ -213,13 +207,12 @@ class Storage:
         ]
 
     async def complete_task(self, chat_id: str, task_id: int) -> bool:
-        if not self._conn:
-            raise RuntimeError("Storage not connected")
-        cursor = await self._conn.execute(
+        conn = self._require_conn()
+        cursor = await conn.execute(
             "UPDATE tasks SET status = ? WHERE chat_id = ? AND id = ?",
             ("done", chat_id, task_id),
         )
-        await self._conn.commit()
+        await conn.commit()
         return cursor.rowcount > 0
 
     async def add_reminder(
@@ -229,9 +222,8 @@ class Storage:
         trigger_time: datetime,
         repeat_interval_seconds: int | None,
     ) -> int:
-        if not self._conn:
-            raise RuntimeError("Storage not connected")
-        cursor = await self._conn.execute(
+        conn = self._require_conn()
+        cursor = await conn.execute(
             """
             INSERT INTO reminders (chat_id, message, trigger_time, repeat_interval_seconds)
             VALUES (?, ?, ?, ?)
@@ -243,21 +235,19 @@ class Storage:
                 repeat_interval_seconds,
             ),
         )
-        await self._conn.commit()
+        await conn.commit()
         return cursor.lastrowid
 
     async def list_reminders(self, chat_id: str) -> list[ReminderRecord]:
-        if not self._conn:
-            raise RuntimeError("Storage not connected")
-        cursor = await self._conn.execute(
+        conn = self._require_conn()
+        async with conn.execute(
             """
             SELECT id, chat_id, message, trigger_time, repeat_interval_seconds
             FROM reminders WHERE chat_id = ? ORDER BY trigger_time ASC
             """,
             (chat_id,),
-        )
-        rows = await cursor.fetchall()
-        await cursor.close()
+        ) as cursor:
+            rows = await cursor.fetchall()
         return [
             ReminderRecord(
                 id=row[0],
@@ -270,42 +260,37 @@ class Storage:
         ]
 
     async def delete_reminder(self, chat_id: str, reminder_id: int) -> bool:
-        if not self._conn:
-            raise RuntimeError("Storage not connected")
-        cursor = await self._conn.execute(
+        conn = self._require_conn()
+        cursor = await conn.execute(
             "DELETE FROM reminders WHERE chat_id = ? AND id = ?",
             (chat_id, reminder_id),
         )
-        await self._conn.commit()
+        await conn.commit()
         return cursor.rowcount > 0
 
     async def delete_reminder_by_id(self, reminder_id: int) -> None:
-        if not self._conn:
-            raise RuntimeError("Storage not connected")
-        await self._conn.execute("DELETE FROM reminders WHERE id = ?", (reminder_id,))
-        await self._conn.commit()
+        conn = self._require_conn()
+        await conn.execute("DELETE FROM reminders WHERE id = ?", (reminder_id,))
+        await conn.commit()
 
     async def update_reminder_time(self, reminder_id: int, trigger_time: datetime) -> None:
-        if not self._conn:
-            raise RuntimeError("Storage not connected")
-        await self._conn.execute(
+        conn = self._require_conn()
+        await conn.execute(
             "UPDATE reminders SET trigger_time = ? WHERE id = ?",
             (trigger_time.isoformat(), reminder_id),
         )
-        await self._conn.commit()
+        await conn.commit()
 
     async def get_reminder_by_id(self, reminder_id: int) -> ReminderRecord | None:
-        if not self._conn:
-            raise RuntimeError("Storage not connected")
-        cursor = await self._conn.execute(
+        conn = self._require_conn()
+        async with conn.execute(
             """
             SELECT id, chat_id, message, trigger_time, repeat_interval_seconds
             FROM reminders WHERE id = ?
             """,
             (reminder_id,),
-        )
-        row = await cursor.fetchone()
-        await cursor.close()
+        ) as cursor:
+            row = await cursor.fetchone()
         if not row:
             return None
         return ReminderRecord(
@@ -317,16 +302,14 @@ class Storage:
         )
 
     async def list_pending_reminders(self) -> list[ReminderRecord]:
-        if not self._conn:
-            raise RuntimeError("Storage not connected")
-        cursor = await self._conn.execute(
+        conn = self._require_conn()
+        async with conn.execute(
             """
             SELECT id, chat_id, message, trigger_time, repeat_interval_seconds
             FROM reminders ORDER BY trigger_time ASC
             """
-        )
-        rows = await cursor.fetchall()
-        await cursor.close()
+        ) as cursor:
+            rows = await cursor.fetchall()
         return [
             ReminderRecord(
                 id=row[0],
@@ -339,16 +322,14 @@ class Storage:
         ]
 
     async def list_monitors(self) -> list[MonitorRecord]:
-        if not self._conn:
-            raise RuntimeError("Storage not connected")
-        cursor = await self._conn.execute(
+        conn = self._require_conn()
+        async with conn.execute(
             """
             SELECT id, chat_id, type, threshold, interval_seconds, enabled
             FROM monitors
             """
-        )
-        rows = await cursor.fetchall()
-        await cursor.close()
+        ) as cursor:
+            rows = await cursor.fetchall()
         return [
             MonitorRecord(
                 id=row[0],
@@ -360,6 +341,11 @@ class Storage:
             )
             for row in rows
         ]
+
+    def _require_conn(self) -> aiosqlite.Connection:
+        if not self._conn:
+            raise RuntimeError("Storage not connected")
+        return self._conn
 
 
 def _parse_ts(value: str) -> datetime:

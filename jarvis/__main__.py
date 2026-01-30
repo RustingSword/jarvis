@@ -32,6 +32,14 @@ def _setup_logging(level: str, log_file: str | None, max_bytes: int, backup_coun
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
         handlers=handlers,
     )
+    _silence_polling_logs()
+
+
+def _silence_polling_logs() -> None:
+    logging.getLogger("telegram").setLevel(logging.WARNING)
+    logging.getLogger("telegram.ext").setLevel(logging.WARNING)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 
 async def _run(config_path: str) -> None:

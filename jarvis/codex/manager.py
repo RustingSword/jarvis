@@ -65,10 +65,7 @@ class CodexManager:
         session_id: str | None = None,
         progress_callback: ProgressCallback | None = None,
     ) -> CodexResult:
-        cmd = [self._config.exec_path, "exec", "--json", "--dangerously-bypass-approvals-and-sandbox"]
-        if session_id:
-            cmd.extend(["resume", session_id])
-        cmd.append(prompt)
+        cmd = self._build_command(prompt, session_id)
 
         logger.info("Running Codex CLI: %s", " ".join(cmd))
         proc = await asyncio.create_subprocess_exec(
@@ -82,21 +79,21 @@ class CodexManager:
         events: List[dict[str, Any]] = []
         stderr_lines: List[str] = []
 
+        stdout_task = asyncio.create_task(
+            self._read_stdout_with_callback(proc.stdout, events, progress_callback)
+        )
+        stderr_task = asyncio.create_task(self._read_stderr(proc.stderr, stderr_lines))
         try:
-            # 创建读取任务
-            stdout_task = asyncio.create_task(
-                self._read_stdout_with_callback(proc.stdout, events, progress_callback)
-            )
-            stderr_task = asyncio.create_task(self._read_stderr(proc.stderr, stderr_lines))
-
-            # 等待进程完成，带超时
             await asyncio.wait_for(
                 asyncio.gather(stdout_task, stderr_task, proc.wait()),
-                timeout=self._config.timeout_seconds
+                timeout=self._config.timeout_seconds,
             )
         except asyncio.TimeoutError as exc:
             proc.kill()
             await proc.wait()
+            stdout_task.cancel()
+            stderr_task.cancel()
+            await asyncio.gather(stdout_task, stderr_task, return_exceptions=True)
             raise CodexTimeoutError("Codex timed out") from exc
 
         stderr_text = "\n".join(stderr_lines).strip()
@@ -175,6 +172,13 @@ class CodexManager:
 
     def _backoff(self, attempt: int) -> float:
         return self._config.retry_backoff_seconds * (2**attempt)
+
+    def _build_command(self, prompt: str, session_id: str | None) -> list[str]:
+        cmd = [self._config.exec_path, "exec", "--json", "--dangerously-bypass-approvals-and-sandbox"]
+        if session_id:
+            cmd.extend(["resume", session_id])
+        cmd.append(prompt)
+        return cmd
 
 
 def _expand_user(path: str) -> str:

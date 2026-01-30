@@ -4,8 +4,6 @@ import asyncio
 import logging
 import os
 from dataclasses import dataclass
-from typing import Callable
-
 import psutil
 
 from jarvis.config import MonitorConfig
@@ -35,9 +33,11 @@ class MonitorTrigger:
 
     async def stop(self) -> None:
         self._running = False
-        for state in self._states:
-            if state.task:
-                state.task.cancel()
+        tasks = [state.task for state in self._states if state.task]
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
         self._states = []
         logger.info("Monitor trigger stopped")
 

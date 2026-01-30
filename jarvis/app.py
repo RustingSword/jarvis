@@ -1,18 +1,47 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
+from collections.abc import Awaitable, Callable
 from datetime import datetime
 
 from jarvis.codex import CodexError, CodexProcessError, CodexTimeoutError, CodexManager
 from jarvis.config import AppConfig
-from jarvis.event_bus import EventBus
+from jarvis.event_bus import Event, EventBus
 from jarvis.storage import ReminderRecord, Storage, TaskRecord
 from jarvis.telegram import TelegramBot
 from jarvis.triggers import TriggerManager
 
 logger = logging.getLogger(__name__)
+
+EVENT_TELEGRAM_MESSAGE = "telegram.message_received"
+EVENT_TELEGRAM_COMMAND = "telegram.command"
+EVENT_TELEGRAM_SEND = "telegram.send_message"
+EVENT_TRIGGER_FIRED = "trigger.fired"
+
+_TOOL_CALL_NAME_MAP = {
+    "shell_command": "执行命令",
+    "read_file": "读取文件",
+    "write_file": "写入文件",
+    "edit_file": "编辑文件",
+    "list_directory": "列出目录",
+    "web_search": "网络搜索",
+    "browser_action": "浏览器操作",
+}
+
+_TOOL_USE_NAME_MAP = {
+    "bash": "执行命令",
+    "read_file": "读取文件",
+    "write_file": "写入文件",
+    "edit_file": "编辑文件",
+    "list_files": "列出文件",
+    "web_search": "网络搜索",
+}
+
+CommandHandler = Callable[[str, list[str]], Awaitable[None]]
+TriggerHandler = Callable[[dict], Awaitable[None]]
 
 
 class JarvisApp:
@@ -24,9 +53,24 @@ class JarvisApp:
         self._telegram = TelegramBot(config.telegram, self._event_bus)
         self._triggers = TriggerManager(self._event_bus, self._storage, config.triggers)
 
-        self._event_bus.subscribe("telegram.message_received", self._on_message)
-        self._event_bus.subscribe("telegram.command", self._on_command)
-        self._event_bus.subscribe("trigger.fired", self._on_trigger)
+        self._command_handlers: dict[str, CommandHandler] = {
+            "start": self._cmd_start,
+            "help": self._cmd_help,
+            "reset": self._cmd_reset,
+            "compact": self._cmd_compact,
+            "task": self._cmd_task,
+            "remind": self._cmd_remind,
+        }
+        self._trigger_handlers: dict[str, TriggerHandler] = {
+            "reminder": self._handle_reminder_trigger,
+            "monitor": self._handle_monitor_trigger,
+            "schedule": self._handle_schedule_trigger,
+            "webhook": self._handle_webhook_trigger,
+        }
+
+        self._event_bus.subscribe(EVENT_TELEGRAM_MESSAGE, self._on_message)
+        self._event_bus.subscribe(EVENT_TELEGRAM_COMMAND, self._on_command)
+        self._event_bus.subscribe(EVENT_TRIGGER_FIRED, self._on_trigger)
 
     async def start(self) -> None:
         await self._storage.connect()
@@ -44,7 +88,7 @@ class JarvisApp:
         stop_event = asyncio.Event()
         await stop_event.wait()
 
-    async def _on_message(self, event) -> None:
+    async def _on_message(self, event: Event) -> None:
         chat_id = event.payload.get("chat_id")
         text = event.payload.get("text", "")
         if not chat_id or not text:
@@ -61,17 +105,11 @@ class JarvisApp:
             result = await self._codex.run(text, session_id=session_id, progress_callback=progress_callback)
         except CodexTimeoutError:
             logger.warning("Codex timed out")
-            await self._event_bus.publish(
-                "telegram.send_message",
-                {"chat_id": chat_id, "text": "Codex 调用超时，请稍后再试。"},
-            )
+            await self._send_message(chat_id, "Codex 调用超时，请稍后再试。")
             return
         except CodexProcessError as exc:
             logger.exception("Codex run failed")
-            await self._event_bus.publish(
-                "telegram.send_message",
-                {"chat_id": chat_id, "text": f"Codex 调用失败: {exc}"},
-            )
+            await self._send_message(chat_id, f"Codex 调用失败: {exc}")
             return
 
         if result.thread_id:
@@ -79,110 +117,23 @@ class JarvisApp:
 
         response_text = result.response_text or "(无可用回复)"
         # 直接发送 Codex 返回的 markdown 内容
-        await self._event_bus.publish(
-            "telegram.send_message",
-            {"chat_id": chat_id, "text": response_text, "markdown": True},
-        )
+        await self._send_markdown(chat_id, response_text)
 
     async def _handle_codex_progress(self, chat_id: str, event: dict) -> None:
         """处理 Codex 进度事件，发送有价值的信息到 Telegram"""
         event_type = event.get("type")
 
-        # 处理 event_msg 类型的事件
         if event_type == "event_msg":
-            payload = event.get("payload", {})
-            msg_type = payload.get("type")
+            await self._handle_event_msg(chat_id, event.get("payload", {}))
+            return
 
-            # AI 思考过程（未加密的）
-            if msg_type == "agent_reasoning":
-                reasoning_text = payload.get("text", "")
-                if reasoning_text:
-                    # 简化思考内容
-                    summary = self._summarize_reasoning(reasoning_text)
-                    if summary:
-                        final_text = f"💭 思考\n{self._as_blockquote(summary)}"
-                        await self._event_bus.publish(
-                            "telegram.send_message",
-                            {"chat_id": chat_id, "text": final_text, "markdown": True},
-                        )
+        if event_type == "response_item":
+            await self._handle_response_item(chat_id, event.get("payload", {}))
+            return
 
-        # 处理 response_item 类型的事件
-        elif event_type == "response_item":
-            payload = event.get("payload", {})
-            item_type = payload.get("type")
-
-            # 工具调用
-            if item_type == "function_call":
-                tool_name = payload.get("name", "")
-                arguments = payload.get("arguments", "")
-
-                # 格式化工具调用信息
-                tool_display = self._format_tool_call(tool_name, arguments)
-                await self._event_bus.publish(
-                    "telegram.send_message",
-                    {"chat_id": chat_id, "text": f"🔧 工具\n{tool_display}", "markdown": True},
-                )
-
-        # 处理 item.completed 事件（兼容不同的 Codex 版本）
-        elif event_type == "item.completed":
-            item = event.get("item", {})
-            item_type = item.get("type")
-
-            # 推理/思考过程
-            if item_type == "reasoning":
-                reasoning_text = ""
-                item_text = item.get("text")
-                if isinstance(item_text, str) and item_text:
-                    reasoning_text = item_text
-                if not reasoning_text:
-                    # 兼容旧格式：从 summary 数组中提取文本
-                    summary_list = item.get("summary", [])
-                    reasoning_texts = []
-                    for s in summary_list:
-                        if isinstance(s, dict) and s.get("type") == "summary_text":
-                            text = s.get("text", "")
-                            if text:
-                                reasoning_texts.append(text)
-                    if reasoning_texts:
-                        reasoning_text = "\n\n".join(reasoning_texts)
-
-                if reasoning_text:
-                    summary = self._summarize_reasoning(reasoning_text)
-                    if summary:
-                        final_text = f"💭 思考\n{self._as_blockquote(summary)}"
-                        await self._event_bus.publish(
-                            "telegram.send_message",
-                            {"chat_id": chat_id, "text": final_text, "markdown": True},
-                        )
-                else:
-                    # 如果没有文本内容，显示简单提示
-                    await self._event_bus.publish(
-                        "telegram.send_message",
-                        {"chat_id": chat_id, "text": "💭 _思考中_...", "markdown": True},
-                    )
-
-            # 命令执行
-            elif item_type == "command_execution":
-                command = item.get("command", "")
-                if command:
-                    command_block = f"```\n{command}\n```"
-                    await self._event_bus.publish(
-                        "telegram.send_message",
-                        {"chat_id": chat_id, "text": f"⚙️ 执行命令\n{command_block}", "markdown": True},
-                    )
-
-            # 工具使用
-            elif item_type == "tool_use":
-                tool_name = item.get("name", "")
-                tool_input = item.get("input", {})
-
-                if tool_name:
-                    # 格式化工具调用
-                    tool_display = self._format_tool_use(tool_name, tool_input)
-                    await self._event_bus.publish(
-                        "telegram.send_message",
-                        {"chat_id": chat_id, "text": f"🔧 工具\n{tool_display}", "markdown": True},
-                    )
+        if event_type == "item.completed":
+            await self._handle_item_completed(chat_id, event.get("item", {}))
+            return
 
     def _summarize_reasoning(self, text: str) -> str:
         """简化思考过程文本，提取关键信息"""
@@ -196,20 +147,7 @@ class JarvisApp:
 
     def _format_tool_call(self, tool_name: str, arguments: str) -> str:
         """格式化工具调用信息"""
-        import json
-
-        # 友好的工具名称映射
-        tool_map = {
-            "shell_command": "执行命令",
-            "read_file": "读取文件",
-            "write_file": "写入文件",
-            "edit_file": "编辑文件",
-            "list_directory": "列出目录",
-            "web_search": "网络搜索",
-            "browser_action": "浏览器操作",
-        }
-
-        tool_display = tool_map.get(tool_name, tool_name)
+        tool_display = _TOOL_CALL_NAME_MAP.get(tool_name, tool_name)
 
         # 尝试解析参数以提取关键信息
         try:
@@ -223,16 +161,15 @@ class JarvisApp:
                 else:
                     cmd_str = str(cmd)
 
-                # 不截断，显示完整命令，用代码块包裹
-                return f"{tool_display}\n```\n{cmd_str}\n```"
+                return _format_code_block(tool_display, cmd_str)
 
             # 对于文件操作，显示文件路径
             elif "path" in args:
                 path = str(args["path"])
-                return f"{tool_display}\n{path}"
+                return _format_tool_path(tool_display, path)
             elif "file" in args:
                 file_path = str(args["file"])
-                return f"{tool_display}\n{file_path}"
+                return _format_tool_path(tool_display, file_path)
 
         except (json.JSONDecodeError, KeyError, TypeError):
             pass
@@ -241,106 +178,51 @@ class JarvisApp:
 
     def _format_tool_use(self, tool_name: str, tool_input: dict) -> str:
         """格式化工具使用信息（用于 item.completed 格式）"""
-        tool_map = {
-            "bash": "执行命令",
-            "read_file": "读取文件",
-            "write_file": "写入文件",
-            "edit_file": "编辑文件",
-            "list_files": "列出文件",
-            "web_search": "网络搜索",
-        }
-
-        tool_display = tool_map.get(tool_name, tool_name)
+        tool_display = _TOOL_USE_NAME_MAP.get(tool_name, tool_name)
 
         # 尝试提取关键信息
         if tool_name == "bash" and "command" in tool_input:
             cmd = tool_input["command"]
-            # 不截断，显示完整命令，用代码块包裹
-            return f"{tool_display}\n```\n{cmd}\n```"
+            return _format_code_block(tool_display, cmd)
         elif "path" in tool_input:
             path = str(tool_input["path"])
-            return f"{tool_display}\n{path}"
+            return _format_tool_path(tool_display, path)
         elif "query" in tool_input:
             query = str(tool_input["query"])
-            return f"{tool_display}\n{query}"
+            return _format_tool_path(tool_display, query)
 
         return tool_display
 
-    def _format_command(self, command: str) -> str:
-        """格式化命令显示"""
-        if len(command) > 60:
-            return f"执行命令: {command[:57]}..."
-        return f"执行命令: {command}"
-
-    def _format_tool_name(self, tool_name: str) -> str:
-        """格式化工具名称为更友好的显示"""
-        tool_map = {
-            "shell_command": "执行命令",
-            "read_file": "读取文件",
-            "write_file": "写入文件",
-            "edit_file": "编辑文件",
-            "list_directory": "列出目录",
-            "web_search": "网络搜索",
-            "browser_action": "浏览器操作",
-        }
-        return tool_map.get(tool_name, f"使用工具: {tool_name}")
-
-    async def _on_command(self, event) -> None:
+    async def _on_command(self, event: Event) -> None:
         chat_id = event.payload.get("chat_id")
         command = event.payload.get("command")
         args = event.payload.get("args", [])
         if not chat_id or not command:
             return
 
-        if command == "start":
-            await self._event_bus.publish(
-                "telegram.send_message",
-                {"chat_id": chat_id, "text": "Jarvis 已启动。输入消息即可对话。"},
-            )
+        handler = self._command_handlers.get(command)
+        if not handler:
+            await self._send_message(chat_id, f"未知命令: {command}")
             return
+        await handler(chat_id, args)
 
-        if command == "help":
-            await self._event_bus.publish(
-                "telegram.send_message",
-                {
-                    "chat_id": chat_id,
-                    "text": "可用命令: /start, /help, /reset, /compact, /task, /remind",
-                },
-            )
-            return
+    async def _cmd_start(self, chat_id: str, args: list[str]) -> None:
+        await self._send_message(chat_id, "Jarvis 已启动。输入消息即可对话。")
 
-        if command == "reset":
-            await self._storage.clear_session(chat_id)
-            await self._event_bus.publish(
-                "telegram.send_message",
-                {"chat_id": chat_id, "text": "会话已重置。"},
-            )
-            return
+    async def _cmd_help(self, chat_id: str, args: list[str]) -> None:
+        await self._send_message(chat_id, "可用命令: /start, /help, /reset, /compact, /task, /remind")
 
-        if command == "compact":
-            await self._handle_compact(chat_id)
-            return
+    async def _cmd_reset(self, chat_id: str, args: list[str]) -> None:
+        await self._storage.clear_session(chat_id)
+        await self._send_message(chat_id, "会话已重置。")
 
-        if command == "task":
-            await self._handle_task_command(chat_id, args)
-            return
-
-        if command == "remind":
-            await self._handle_remind_command(chat_id, args)
-            return
-
-        await self._event_bus.publish(
-            "telegram.send_message",
-            {"chat_id": chat_id, "text": f"未知命令: {command}"},
-        )
+    async def _cmd_compact(self, chat_id: str, args: list[str]) -> None:
+        await self._handle_compact(chat_id)
 
     async def _handle_compact(self, chat_id: str) -> None:
         session = await self._storage.get_session(chat_id)
         if not session:
-            await self._event_bus.publish(
-                "telegram.send_message",
-                {"chat_id": chat_id, "text": "当前没有可压缩的会话。"},
-            )
+            await self._send_message(chat_id, "当前没有可压缩的会话。")
             return
         try:
             summary_result = await self._codex.run(
@@ -349,10 +231,7 @@ class JarvisApp:
                 session_id=session.thread_id,
             )
         except CodexTimeoutError:
-            await self._event_bus.publish(
-                "telegram.send_message",
-                {"chat_id": chat_id, "text": "会话压缩超时，请稍后再试。"},
-            )
+            await self._send_message(chat_id, "会话压缩超时，请稍后再试。")
             return
         except CodexProcessError as exc:
             error_msg = str(exc)
@@ -362,18 +241,12 @@ class JarvisApp:
                     "会话文件可能已损坏。建议使用 /reset 重置会话。\n"
                     f"技术详情: {exc}"
                 )
-            await self._event_bus.publish(
-                "telegram.send_message",
-                {"chat_id": chat_id, "text": f"会话压缩失败: {error_msg}"},
-            )
+            await self._send_message(chat_id, f"会话压缩失败: {error_msg}")
             return
 
         summary = summary_result.response_text.strip()
         if not summary:
-            await self._event_bus.publish(
-                "telegram.send_message",
-                {"chat_id": chat_id, "text": "未获取到摘要内容，压缩失败。"},
-            )
+            await self._send_message(chat_id, "未获取到摘要内容，压缩失败。")
             return
 
         await self._storage.save_summary(chat_id, summary)
@@ -388,107 +261,62 @@ class JarvisApp:
         if seed_result and seed_result.thread_id:
             await self._storage.upsert_session(chat_id, seed_result.thread_id)
 
-        await self._event_bus.publish(
-            "telegram.send_message",
-            {"chat_id": chat_id, "text": "会话已压缩并重置。"},
-        )
+        await self._send_message(chat_id, "会话已压缩并重置。")
 
-    async def _handle_task_command(self, chat_id: str, args: list[str]) -> None:
+    async def _cmd_task(self, chat_id: str, args: list[str]) -> None:
         if not args:
-            await self._event_bus.publish(
-                "telegram.send_message",
-                {
-                    "chat_id": chat_id,
-                    "text": "用法: /task add <描述> | /task list | /task done <id>",
-                },
-            )
+            await self._send_message(chat_id, "用法: /task add <描述> | /task list | /task done <id>")
             return
         action = args[0]
         if action == "add":
             description = " ".join(args[1:]).strip()
             if not description:
-                await self._event_bus.publish(
-                    "telegram.send_message",
-                    {"chat_id": chat_id, "text": "请提供任务描述。"},
-                )
+                await self._send_message(chat_id, "请提供任务描述。")
                 return
             task_id = await self._storage.add_task(chat_id, description, due_at=None)
-            await self._event_bus.publish(
-                "telegram.send_message",
-                {"chat_id": chat_id, "text": f"任务已添加，ID: {task_id}"},
-            )
+            await self._send_message(chat_id, f"任务已添加，ID: {task_id}")
             return
         if action == "list":
             tasks = await self._storage.list_tasks(chat_id)
             message = _format_tasks(tasks)
-            await self._event_bus.publish(
-                "telegram.send_message",
-                {"chat_id": chat_id, "text": message},
-            )
+            await self._send_message(chat_id, message)
             return
         if action == "done":
             if len(args) < 2 or not args[1].isdigit():
-                await self._event_bus.publish(
-                    "telegram.send_message",
-                    {"chat_id": chat_id, "text": "用法: /task done <id>"},
-                )
+                await self._send_message(chat_id, "用法: /task done <id>")
                 return
             task_id = int(args[1])
             ok = await self._storage.complete_task(chat_id, task_id)
-            await self._event_bus.publish(
-                "telegram.send_message",
-                {"chat_id": chat_id, "text": "任务已完成。" if ok else "未找到该任务。"},
-            )
+            await self._send_message(chat_id, "任务已完成。" if ok else "未找到该任务。")
             return
 
-        await self._event_bus.publish(
-            "telegram.send_message",
-            {"chat_id": chat_id, "text": "未知 task 子命令。"},
-        )
+        await self._send_message(chat_id, "未知 task 子命令。")
 
-    async def _handle_remind_command(self, chat_id: str, args: list[str]) -> None:
+    async def _cmd_remind(self, chat_id: str, args: list[str]) -> None:
         if not args:
-            await self._event_bus.publish(
-                "telegram.send_message",
-                {
-                    "chat_id": chat_id,
-                    "text": "用法: /remind <YYYY-MM-DD HH:MM> <内容> | /remind list | /remind cancel <id>",
-                },
+            await self._send_message(
+                chat_id,
+                "用法: /remind <YYYY-MM-DD HH:MM> <内容> | /remind list | /remind cancel <id>",
             )
             return
         action = args[0]
         if action == "list":
             reminders = await self._storage.list_reminders(chat_id)
             message = _format_reminders(reminders)
-            await self._event_bus.publish(
-                "telegram.send_message",
-                {"chat_id": chat_id, "text": message},
-            )
+            await self._send_message(chat_id, message)
             return
         if action == "cancel":
             if len(args) < 2 or not args[1].isdigit():
-                await self._event_bus.publish(
-                    "telegram.send_message",
-                    {"chat_id": chat_id, "text": "用法: /remind cancel <id>"},
-                )
+                await self._send_message(chat_id, "用法: /remind cancel <id>")
                 return
             reminder_id = int(args[1])
             ok = await self._storage.delete_reminder(chat_id, reminder_id)
-            await self._event_bus.publish(
-                "telegram.send_message",
-                {"chat_id": chat_id, "text": "提醒已取消。" if ok else "未找到该提醒。"},
-            )
+            await self._send_message(chat_id, "提醒已取消。" if ok else "未找到该提醒。")
             return
 
         dt, message = _parse_remind_args(args)
         if not dt or not message:
-            await self._event_bus.publish(
-                "telegram.send_message",
-                {
-                    "chat_id": chat_id,
-                    "text": "用法: /remind <YYYY-MM-DD HH:MM> <内容>",
-                },
-            )
+            await self._send_message(chat_id, "用法: /remind <YYYY-MM-DD HH:MM> <内容>")
             return
         reminder_id = await self._storage.add_reminder(chat_id, message, dt, None)
         reminder = ReminderRecord(
@@ -499,69 +327,138 @@ class JarvisApp:
             repeat_interval_seconds=None,
         )
         await self._triggers.schedule_reminder(reminder)
-        await self._event_bus.publish(
-            "telegram.send_message",
-            {"chat_id": chat_id, "text": f"提醒已设置，ID: {reminder_id}"},
-        )
+        await self._send_message(chat_id, f"提醒已设置，ID: {reminder_id}")
 
-    async def _on_trigger(self, event) -> None:
+    async def _on_trigger(self, event: Event) -> None:
         payload = event.payload
         trigger_type = payload.get("type")
-        if trigger_type == "reminder":
-            chat_id = payload.get("chat_id")
-            message = payload.get("message") or "提醒"
-            if chat_id:
-                await self._event_bus.publish(
-                    "telegram.send_message",
-                    {"chat_id": chat_id, "text": f"⏰ {message}"},
-                )
-            reminder_id = payload.get("reminder_id")
-            repeat_interval_seconds = payload.get("repeat_interval_seconds")
-            if reminder_id:
-                await self._triggers.handle_reminder_fired(
-                    int(reminder_id),
-                    int(repeat_interval_seconds) if repeat_interval_seconds else None,
-                )
+        if not trigger_type:
+            logger.debug("Trigger missing type: %s", payload)
             return
-
-        if trigger_type == "monitor":
-            chat_id = payload.get("chat_id")
-            message = (
-                f"监控告警: {payload.get('name')} "
-                f"{payload.get('metric')}={payload.get('value')} "
-                f"(阈值 {payload.get('threshold')})"
-            )
-            if chat_id:
-                await self._event_bus.publish(
-                    "telegram.send_message",
-                    {"chat_id": chat_id, "text": message},
-                )
+        handler = self._trigger_handlers.get(trigger_type)
+        if handler:
+            await handler(payload)
             return
-
-        if trigger_type == "schedule":
-            chat_id = payload.get("chat_id")
-            message = payload.get("message") or f"计划触发: {payload.get('name')}"
-            if chat_id:
-                await self._event_bus.publish(
-                    "telegram.send_message",
-                    {"chat_id": chat_id, "text": message},
-                )
-            return
-
-        if trigger_type == "webhook":
-            webhook_payload = payload.get("payload")
-            logger.info("Webhook fired: %s", webhook_payload)
-            if isinstance(webhook_payload, dict):
-                chat_id = webhook_payload.get("chat_id")
-                message = webhook_payload.get("message")
-                if chat_id and message:
-                    await self._event_bus.publish(
-                        "telegram.send_message",
-                        {"chat_id": str(chat_id), "text": str(message)},
-                    )
-            return
-
         logger.debug("Unhandled trigger: %s", payload)
+
+    async def _handle_reminder_trigger(self, payload: dict) -> None:
+        chat_id = payload.get("chat_id")
+        message = payload.get("message") or "提醒"
+        if chat_id:
+            await self._send_message(chat_id, f"⏰ {message}")
+        reminder_id = payload.get("reminder_id")
+        repeat_interval_seconds = payload.get("repeat_interval_seconds")
+        if reminder_id:
+            await self._triggers.handle_reminder_fired(
+                int(reminder_id),
+                int(repeat_interval_seconds) if repeat_interval_seconds else None,
+            )
+
+    async def _handle_monitor_trigger(self, payload: dict) -> None:
+        chat_id = payload.get("chat_id")
+        message = (
+            f"监控告警: {payload.get('name')} "
+            f"{payload.get('metric')}={payload.get('value')} "
+            f"(阈值 {payload.get('threshold')})"
+        )
+        if chat_id:
+            await self._send_message(chat_id, message)
+
+    async def _handle_schedule_trigger(self, payload: dict) -> None:
+        chat_id = payload.get("chat_id")
+        message = payload.get("message") or f"计划触发: {payload.get('name')}"
+        if chat_id:
+            await self._send_message(chat_id, message)
+
+    async def _handle_webhook_trigger(self, payload: dict) -> None:
+        webhook_payload = payload.get("payload")
+        logger.info("Webhook fired: %s", webhook_payload)
+        if isinstance(webhook_payload, dict):
+            chat_id = webhook_payload.get("chat_id")
+            message = webhook_payload.get("message")
+            if chat_id and message:
+                await self._send_message(str(chat_id), str(message))
+
+    async def _handle_event_msg(self, chat_id: str, payload: dict) -> None:
+        msg_type = payload.get("type")
+        if msg_type != "agent_reasoning":
+            return
+        reasoning_text = payload.get("text", "")
+        if not reasoning_text:
+            return
+        summary = self._summarize_reasoning(reasoning_text)
+        if not summary:
+            return
+        final_text = f"💭 思考\n{self._as_blockquote(summary)}"
+        await self._send_markdown(chat_id, final_text)
+
+    async def _handle_response_item(self, chat_id: str, payload: dict) -> None:
+        item_type = payload.get("type")
+        if item_type != "function_call":
+            return
+        tool_name = payload.get("name", "")
+        arguments = payload.get("arguments", "")
+        tool_display = self._format_tool_call(tool_name, arguments)
+        await self._send_markdown(chat_id, f"🔧 工具\n{tool_display}")
+
+    async def _handle_item_completed(self, chat_id: str, item: dict) -> None:
+        item_type = item.get("type")
+        if item_type == "reasoning":
+            await self._handle_item_reasoning(chat_id, item)
+            return
+        if item_type == "command_execution":
+            command = item.get("command", "")
+            if command:
+                await self._send_markdown(chat_id, _format_code_block("⚙️ 执行命令", command))
+            return
+        if item_type == "tool_use":
+            tool_name = item.get("name", "")
+            tool_input = item.get("input", {})
+            if tool_name:
+                tool_display = self._format_tool_use(tool_name, tool_input)
+                await self._send_markdown(chat_id, f"🔧 工具\n{tool_display}")
+
+    async def _handle_item_reasoning(self, chat_id: str, item: dict) -> None:
+        reasoning_text = ""
+        item_text = item.get("text")
+        if isinstance(item_text, str) and item_text:
+            reasoning_text = item_text
+        if not reasoning_text:
+            summary_list = item.get("summary", [])
+            reasoning_texts = [
+                s.get("text", "")
+                for s in summary_list
+                if isinstance(s, dict) and s.get("type") == "summary_text" and s.get("text")
+            ]
+            if reasoning_texts:
+                reasoning_text = "\n\n".join(reasoning_texts)
+
+        if reasoning_text:
+            summary = self._summarize_reasoning(reasoning_text)
+            if summary:
+                final_text = f"💭 思考\n{self._as_blockquote(summary)}"
+                await self._send_markdown(chat_id, final_text)
+            return
+
+        await self._send_markdown(chat_id, "💭 _思考中_...")
+
+    async def _send_message(
+        self,
+        chat_id: str,
+        text: str,
+        *,
+        markdown: bool = False,
+        parse_mode: str | None = None,
+    ) -> None:
+        payload = {"chat_id": chat_id, "text": text}
+        if markdown:
+            payload["markdown"] = True
+        if parse_mode:
+            payload["parse_mode"] = parse_mode
+        await self._event_bus.publish(EVENT_TELEGRAM_SEND, payload)
+
+    async def _send_markdown(self, chat_id: str, text: str) -> None:
+        await self._send_message(chat_id, text, markdown=True)
 
 
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -609,3 +506,11 @@ def _format_reminders(reminders: list[ReminderRecord]) -> str:
         ts = reminder.trigger_time.isoformat(sep=" ", timespec="minutes")
         lines.append(f"⏰ [{reminder.id}] {ts} {reminder.message}")
     return "\n".join(lines)
+
+
+def _format_code_block(label: str, content: str) -> str:
+    return f"{label}\n```\n{content}\n```"
+
+
+def _format_tool_path(label: str, value: str) -> str:
+    return f"{label}\n{value}"

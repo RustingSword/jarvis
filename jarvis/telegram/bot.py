@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import functools
 import logging
 from typing import Any
 
@@ -14,6 +15,15 @@ from jarvis.event_bus import EventBus
 
 logger = logging.getLogger(__name__)
 
+COMMAND_SPECS = (
+    ("start", "开始使用 Jarvis"),
+    ("help", "显示帮助信息"),
+    ("reset", "重置对话上下文"),
+    ("compact", "压缩对话历史"),
+    ("task", "创建或管理任务"),
+    ("remind", "设置提醒"),
+)
+
 
 class TelegramBot:
     def __init__(self, config: TelegramConfig, event_bus: EventBus) -> None:
@@ -25,27 +35,14 @@ class TelegramBot:
 
     async def start(self) -> None:
         app = ApplicationBuilder().token(self._config.token).build()
-        app.add_handler(CommandHandler("start", self._handle_start))
-        app.add_handler(CommandHandler("help", self._handle_help))
-        app.add_handler(CommandHandler("reset", self._handle_reset))
-        app.add_handler(CommandHandler("compact", self._handle_compact))
-        app.add_handler(CommandHandler("task", self._handle_task))
-        app.add_handler(CommandHandler("remind", self._handle_remind))
-        app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self._handle_message))
+        self._register_handlers(app)
 
         self._app = app
         await app.initialize()
         await app.start()
 
         # 设置 bot 命令列表，清除之前的所有命令
-        commands = [
-            BotCommand("start", "开始使用 Jarvis"),
-            BotCommand("help", "显示帮助信息"),
-            BotCommand("reset", "重置对话上下文"),
-            BotCommand("compact", "压缩对话历史"),
-            BotCommand("task", "创建或管理任务"),
-            BotCommand("remind", "设置提醒"),
-        ]
+        commands = [BotCommand(name, description) for name, description in COMMAND_SPECS]
         await app.bot.set_my_commands(commands)
         logger.info("Telegram bot commands set")
 
@@ -61,24 +58,6 @@ class TelegramBot:
         await self._app.stop()
         await self._app.shutdown()
         logger.info("Telegram bot stopped")
-
-    async def _handle_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        await self._publish_command(update, context, "start")
-
-    async def _handle_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        await self._publish_command(update, context, "help")
-
-    async def _handle_reset(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        await self._publish_command(update, context, "reset")
-
-    async def _handle_compact(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        await self._publish_command(update, context, "compact")
-
-    async def _handle_task(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        await self._publish_command(update, context, "task")
-
-    async def _handle_remind(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        await self._publish_command(update, context, "remind")
 
     async def _handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.message:
@@ -135,3 +114,9 @@ class TelegramBot:
                 await self._app.bot.send_message(chat_id=chat_id, text=raw_text, parse_mode=None)
             else:
                 raise
+
+    def _register_handlers(self, app: Application) -> None:
+        for command, _description in COMMAND_SPECS:
+            handler = functools.partial(self._publish_command, command=command)
+            app.add_handler(CommandHandler(command, handler))
+        app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self._handle_message))

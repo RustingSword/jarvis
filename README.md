@@ -28,7 +28,8 @@
 
 1. 安装依赖：
    ```bash
-   pip install -e .
+   python -m venv .venv
+   .venv/bin/pip install -e .
    ```
 
 2. 配置：
@@ -41,6 +42,22 @@
    ```bash
    python -m jarvis --config config.yaml
    ```
+
+### 常用操作
+
+```bash
+# 启动/停止/重启/查看状态（本地前台以外方式运行）
+./scripts/run.sh start
+./scripts/run.sh stop
+./scripts/run.sh restart
+./scripts/run.sh status
+
+# 查看日志
+tail -f ~/.jarvis/jarvis.log
+
+# 快速自检（配置 + 存储）
+./scripts/smoke_test.sh
+```
 
 ### VPS 部署
 
@@ -96,26 +113,38 @@ codex:
   workspace_dir: "~/workspace"  # Codex 工作目录
   exec_path: "codex"  # Codex CLI 路径
   timeout_seconds: 120  # 超时时间
+  max_retries: 2
+  retry_backoff_seconds: 0.5
 
 storage:
   db_path: "~/.jarvis/jarvis.db"  # 数据库路径
   session_dir: "~/.jarvis/sessions"  # 会话存储目录
 
+logging:
+  level: "INFO"
+  file: "~/.jarvis/jarvis.log"
+  max_bytes: 10485760
+  backup_count: 5
+
 triggers:
   scheduler:
     - name: "daily_summary"
       cron: "0 9 * * *"  # 每天 9 点
-      action: "send_summary"
+      chat_id: "YOUR_CHAT_ID"
+      message: "每日提醒：记得查看任务清单。"
 
   monitors:
     - name: "cpu_alert"
       type: "cpu"
       threshold: 80  # CPU 使用率超过 80% 告警
-      interval: 60  # 检查间隔（秒）
+      interval_seconds: 60  # 检查间隔（秒）
+      chat_id: "YOUR_CHAT_ID"
+      enabled: true
 
-logging:
-  level: "INFO"
-  file: "/var/log/jarvis/jarvis.log"  # 日志文件（可选）
+  webhook:
+    host: "0.0.0.0"
+    port: 8080
+    token: "CHANGE_ME"
 ```
 
 ### 环境变量（.env）
@@ -123,16 +152,27 @@ logging:
 敏感信息建议通过环境变量配置：
 
 ```bash
-TELEGRAM_BOT_TOKEN=your_token_here
+TELEGRAM_TOKEN=your_token_here
+
+CODEX_WORKSPACE_DIR=~/workspace
+CODEX_EXEC_PATH=codex
+
+JARVIS_DB_PATH=~/.jarvis/jarvis.db
+JARVIS_SESSION_DIR=~/.jarvis/sessions
+
 WEBHOOK_TOKEN=your_webhook_token
-JARVIS_LOG_FILE=/var/log/jarvis/jarvis.log
+WEBHOOK_HOST=0.0.0.0
+WEBHOOK_PORT=8080
+
+JARVIS_LOG_LEVEL=INFO
+JARVIS_LOG_FILE=~/.jarvis/jarvis.log
 ```
 
 ## 工具脚本
 
 - `scripts/install.sh` - 一键安装（创建用户、目录、venv、systemd 服务）
-- `scripts/run.sh` - 本地运行脚本
-- `scripts/smoke_test.sh` - 配置和存储测试
+- `scripts/run.sh` - 本地运行脚本（start|stop|restart|status，读取 config.yaml 与 .env）
+- `scripts/smoke_test.sh` - 配置与存储自检
 
 ## 技术栈
 
