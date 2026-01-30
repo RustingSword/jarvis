@@ -8,6 +8,7 @@ from aiohttp import web
 
 from jarvis.config import WebhookConfig
 from jarvis.event_bus import EventBus
+from jarvis.events import TRIGGER_FIRED
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +48,7 @@ class WebhookServer:
             return web.json_response({"ok": False, "error": "invalid_json"}, status=400)
 
         await self.event_bus.publish(
-            "trigger.fired",
+            TRIGGER_FIRED,
             {
                 "type": "webhook",
                 "payload": payload,

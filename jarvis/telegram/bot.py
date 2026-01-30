@@ -14,6 +14,7 @@ from telegram.ext import Application, ApplicationBuilder, CommandHandler, Contex
 
 from jarvis.config import TelegramConfig
 from jarvis.event_bus import EventBus
+from jarvis.events import TELEGRAM_COMMAND, TELEGRAM_MESSAGE_RECEIVED, TELEGRAM_SEND
 
 logger = logging.getLogger(__name__)
 
@@ -24,8 +25,6 @@ COMMAND_SPECS = (
     ("compact", "压缩对话历史"),
     ("resume", "恢复历史会话"),
     ("verbosity", "设置输出详细程度"),
-    ("task", "创建或管理任务"),
-    ("remind", "设置提醒"),
     ("skills", "查看或安装技能"),
     ("memory", "记忆搜索与写入"),
 )
@@ -38,7 +37,7 @@ class TelegramBot:
         self._app: Application | None = None
         self._media_dir = Path(self._config.media_dir).expanduser()
 
-        event_bus.subscribe("telegram.send_message", self._on_send_message)
+        event_bus.subscribe(TELEGRAM_SEND, self._on_send_message)
 
     async def start(self) -> None:
         app = ApplicationBuilder().token(self._config.token).build()
@@ -82,7 +81,7 @@ class TelegramBot:
             "media_group_id": message.media_group_id,
             "attachments": attachments,
         }
-        await self._event_bus.publish("telegram.message_received", payload)
+        await self._event_bus.publish(TELEGRAM_MESSAGE_RECEIVED, payload)
 
     async def _publish_command(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE, command: str
@@ -95,7 +94,7 @@ class TelegramBot:
             "raw_text": update.message.text if update.message else "",
             "message_id": update.message.message_id if update.message else None,
         }
-        await self._event_bus.publish("telegram.command", payload)
+        await self._event_bus.publish(TELEGRAM_COMMAND, payload)
 
     async def _on_send_message(self, event) -> None:
         if not self._app or not self._app.bot:

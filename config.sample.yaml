@@ -36,7 +36,7 @@ triggers:
   scheduler:
     - name: "daily_summary"
       cron: "0 9 * * *"
-      message: "每日提醒：记得查看任务清单。"
+      message: "每日提醒：记得规划今日安排。"
 
   monitors:
     - name: "cpu_alert"

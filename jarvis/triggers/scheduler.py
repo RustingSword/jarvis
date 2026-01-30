@@ -1,24 +1,16 @@
 from __future__ import annotations
 
-import asyncio
 import logging
-from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import timezone
+
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from jarvis.config import SchedulerJobConfig
 from jarvis.event_bus import EventBus
+from jarvis.events import TRIGGER_FIRED
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass(slots=True)
-class ReminderPayload:
-    reminder_id: int
-    chat_id: str
-    message: str
-    repeat_interval_seconds: int | None
 
 
 class SchedulerTrigger:
@@ -56,22 +48,6 @@ class SchedulerTrigger:
             )
             logger.info("Scheduled job '%s' with cron '%s'", job.name, job.cron)
 
-    def schedule_reminder(
-        self,
-        reminder: ReminderPayload,
-        run_at: datetime,
-    ) -> None:
-        job_id = f"reminder_{reminder.reminder_id}"
-        self._scheduler.add_job(
-            self._fire_reminder,
-            trigger="date",
-            run_date=run_at,
-            id=job_id,
-            replace_existing=True,
-            kwargs={"reminder": reminder},
-        )
-        logger.info("Scheduled reminder %s at %s", reminder.reminder_id, run_at)
-
     async def _fire_job(self, name: str, chat_id: str | None, message: str | None) -> None:
         payload = {
             "type": "schedule",
@@ -79,14 +55,4 @@ class SchedulerTrigger:
             "chat_id": chat_id,
             "message": message,
         }
-        await self._event_bus.publish("trigger.fired", payload)
-
-    async def _fire_reminder(self, reminder: ReminderPayload) -> None:
-        payload = {
-            "type": "reminder",
-            "reminder_id": reminder.reminder_id,
-            "chat_id": reminder.chat_id,
-            "message": reminder.message,
-            "repeat_interval_seconds": reminder.repeat_interval_seconds,
-        }
-        await self._event_bus.publish("trigger.fired", payload)
+        await self._event_bus.publish(TRIGGER_FIRED, payload)

@@ -8,6 +8,7 @@ import psutil
 
 from jarvis.config import MonitorConfig
 from jarvis.event_bus import EventBus
+from jarvis.events import TRIGGER_FIRED
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +55,7 @@ class MonitorTrigger:
                         "threshold": config.threshold,
                         "chat_id": config.chat_id,
                     }
-                    await self._event_bus.publish("trigger.fired", payload)
+                    await self._event_bus.publish(TRIGGER_FIRED, payload)
             except Exception:
                 logger.exception("Monitor '%s' failed", config.name)
             await asyncio.sleep(config.interval_seconds)

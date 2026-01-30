@@ -7,14 +7,14 @@
 ## 需求总结
 
 ### 功能需求
-- **综合助理功能**：任务管理、信息查询、系统监控
+- **综合助理功能**：信息查询、系统监控、记忆管理
 - **混合触发方式**：时间触发、系统事件、外部 API
 - **双向通信**：被动响应 + 主动推送
 - **会话管理**：类似 clawdbot 的 session 管理（独立上下文、/reset、/compact）
 
 ### 技术需求
 - **部署方式**：本地服务器/VPS，systemd 服务
-- **数据持久化**：对话历史、任务提醒、监控配置、用户偏好
+- **数据持久化**：对话历史、监控配置、用户偏好
 - **配置管理**：基础规则用配置文件，临时规则用命令
 
 ## 架构设计
@@ -117,14 +117,13 @@
 ### 5. Storage Layer（存储层）
 
 **数据存储：**
-- **SQLite**: 结构化数据（任务、提醒、监控配置）
+- **SQLite**: 结构化数据（会话、监控配置、用户偏好）
 - **文件系统**: Session 数据（~/.jarvis/sessions/{chat_id}/）
 
 **数据模型：**
 - sessions: chat_id, session_id, created_at, last_active
-- tasks: id, chat_id, title, description, due_date, status
-- reminders: id, chat_id, message, trigger_time, repeat_rule
 - monitors: id, chat_id, type, config, threshold, enabled
+- settings: chat_id, key, value, updated_at
 
 ## 配置管理
 
@@ -154,9 +153,9 @@ storage:
 ```
 
 ### 动态配置（通过命令）
-- `/remind <time> <message>` - 添加提醒
-- `/monitor <type> <threshold>` - 添加监控
-- `/task add <description>` - 添加任务
+- `/verbosity <full|compact|reset>` - 输出详细程度
+- `/skills ...` - 技能来源/安装管理
+- `/memory ...` - 记忆写入与检索
 
 ## 实现计划
 
@@ -177,8 +176,8 @@ storage:
 3. Webhook 触发器
 
 ### Phase 4: 高级功能
-1. 任务管理
-2. 提醒系统
+1. 技能管理
+2. 记忆管理
 3. 系统监控
 
 ### Phase 5: 部署和运维

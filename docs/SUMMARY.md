@@ -109,7 +109,7 @@ jarvis/
 
 ### Telegram Bot Manager
 - 基于 python-telegram-bot
-- 命令路由（/start、/help、/reset、/compact、/task、/remind）
+- 命令路由（/start、/help、/reset、/compact）
 - 消息过滤
 - 事件发布
 
@@ -122,8 +122,8 @@ jarvis/
 - SQLite 数据库
 - 表结构：
   - `sessions`：会话管理
-  - `tasks`：任务列表
-  - `reminders`：提醒列表
+  - `monitors`：监控配置
+  - `settings`：用户偏好
 - 异步操作（aiosqlite）
 
 ## 使用场景
