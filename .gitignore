@@ -1,0 +1,7 @@
+.venv/
+__pycache__/
+*.log
+
+# Local artifacts
+chat.png
+jarvis.pid

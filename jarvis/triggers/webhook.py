@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from aiohttp import web
@@ -12,15 +12,16 @@ from jarvis.event_bus import EventBus
 logger = logging.getLogger(__name__)
 
 
-@dataclass(slots=True)
+@dataclass
 class WebhookServer:
     config: WebhookConfig
     event_bus: EventBus
+    _app: web.Application = field(init=False, default=None)
+    _runner: web.AppRunner | None = field(init=False, default=None)
+    _site: web.TCPSite | None = field(init=False, default=None)
 
     def __post_init__(self) -> None:
         self._app = web.Application()
-        self._runner: web.AppRunner | None = None
-        self._site: web.TCPSite | None = None
         self._app.add_routes([web.post("/webhook", self._handle_webhook)])
 
     async def start(self) -> None:
