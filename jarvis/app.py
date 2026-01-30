@@ -8,8 +8,9 @@ from collections.abc import Awaitable, Callable
 from datetime import datetime
 
 from jarvis.codex import CodexError, CodexProcessError, CodexTimeoutError, CodexManager
-from jarvis.config import AppConfig
+from jarvis.config import AppConfig, SkillSourceConfig, persist_skill_source
 from jarvis.event_bus import Event, EventBus
+from jarvis.skills import SkillError, install_skill, list_installed_skills, list_remote_skills
 from jarvis.storage import ReminderRecord, Storage, TaskRecord
 from jarvis.telegram import TelegramBot
 from jarvis.triggers import TriggerManager
@@ -52,6 +53,8 @@ class JarvisApp:
         self._codex = CodexManager(config.codex)
         self._telegram = TelegramBot(config.telegram, self._event_bus)
         self._triggers = TriggerManager(self._event_bus, self._storage, config.triggers)
+        self._default_verbosity = (config.output.verbosity or "full").lower()
+        self._verbosity_by_chat: dict[str, str] = {}
 
         self._command_handlers: dict[str, CommandHandler] = {
             "start": self._cmd_start,
@@ -59,8 +62,10 @@ class JarvisApp:
             "reset": self._cmd_reset,
             "compact": self._cmd_compact,
             "resume": self._cmd_resume,
+            "verbosity": self._cmd_verbosity,
             "task": self._cmd_task,
             "remind": self._cmd_remind,
+            "skills": self._cmd_skills,
         }
         self._trigger_handlers: dict[str, TriggerHandler] = {
             "reminder": self._handle_reminder_trigger,
@@ -95,6 +100,7 @@ class JarvisApp:
         if not chat_id or not text:
             return
 
+        await self._ensure_verbosity(chat_id)
         session = await self._storage.get_session(chat_id)
         thread_id = session.thread_id if session else None
 
@@ -146,6 +152,42 @@ class JarvisApp:
         """简化思考过程文本，提取关键信息"""
         # 保留原始markdown格式，不做处理
         return text
+
+    async def _ensure_verbosity(self, chat_id: str) -> None:
+        if chat_id in self._verbosity_by_chat:
+            return
+        stored = await self._storage.get_setting(chat_id, "verbosity")
+        normalized = self._normalize_verbosity(stored) if stored else None
+        self._verbosity_by_chat[chat_id] = normalized or self._default_verbosity
+
+    def _get_chat_verbosity(self, chat_id: str) -> str:
+        return self._verbosity_by_chat.get(chat_id, self._default_verbosity)
+
+    def _show_tool_messages(self, chat_id: str) -> bool:
+        return self._get_chat_verbosity(chat_id) not in {"compact", "minimal"}
+
+    @staticmethod
+    def _normalize_verbosity(value: str | None) -> str | None:
+        if not value:
+            return None
+        raw = value.strip().lower()
+        aliases = {
+            "full": "full",
+            "verbose": "full",
+            "normal": "full",
+            "detail": "full",
+            "详细": "full",
+            "完整": "full",
+            "compact": "compact",
+            "minimal": "compact",
+            "lite": "compact",
+            "quiet": "compact",
+            "精简": "compact",
+            "简洁": "compact",
+            "简短": "compact",
+            "安静": "compact",
+        }
+        return aliases.get(raw)
 
     @staticmethod
     def _as_blockquote(text: str) -> str:
@@ -207,6 +249,7 @@ class JarvisApp:
         if not chat_id or not command:
             return
 
+        await self._ensure_verbosity(chat_id)
         handler = self._command_handlers.get(command)
         if not handler:
             await self._send_message(chat_id, f"未知命令: {command}")
@@ -227,8 +270,11 @@ class JarvisApp:
                     "/reset - 重置当前对话上下文",
                     "/compact - 压缩对话历史并重置",
                     "/resume <id> - 恢复历史会话（不带 id 会列出最近会话）",
+                    "/verbosity <full|compact|reset> - 控制输出详细程度",
                     "/task add <描述> | /task list | /task done <id> - 任务管理",
                     "/remind <YYYY-MM-DD HH:MM> <内容> | /remind list | /remind cancel <id> - 提醒",
+                    "/skills sources | /skills list [source] | /skills installed | "
+                    "/skills install <source> <name> | /skills add-source <name> <repo> <path> [ref] [token_env] - skills 管理",
                     "",
                     "提示：每条消息前会显示会话标识，如 > [12]。",
                 ]
@@ -261,6 +307,34 @@ class JarvisApp:
             await self._send_message(chat_id, f"未找到会话 ID: {session_id}")
             return
         await self._send_message(chat_id, "已恢复会话。")
+
+    async def _cmd_verbosity(self, chat_id: str, args: list[str]) -> None:
+        if not args:
+            current = self._get_chat_verbosity(chat_id)
+            await self._send_message(
+                chat_id,
+                f"当前 verbosity: {current}\n用法: /verbosity full|compact|reset",
+            )
+            return
+
+        action = args[0].strip().lower()
+        if action in {"reset", "default"}:
+            await self._storage.delete_setting(chat_id, "verbosity")
+            self._verbosity_by_chat[chat_id] = self._default_verbosity
+            await self._send_message(chat_id, f"verbosity 已重置为默认值: {self._default_verbosity}")
+            return
+
+        normalized = self._normalize_verbosity(args[0])
+        if not normalized:
+            await self._send_message(chat_id, "用法: /verbosity full|compact|reset")
+            return
+
+        self._verbosity_by_chat[chat_id] = normalized
+        await self._storage.set_setting(chat_id, "verbosity", normalized)
+        await self._send_message(
+            chat_id,
+            f"verbosity 已设置为: {normalized}",
+        )
 
     async def _handle_compact(self, chat_id: str) -> None:
         session = await self._storage.get_session(chat_id)
@@ -372,6 +446,132 @@ class JarvisApp:
         await self._triggers.schedule_reminder(reminder)
         await self._send_message(chat_id, f"提醒已设置，ID: {reminder_id}")
 
+    async def _cmd_skills(self, chat_id: str, args: list[str]) -> None:
+        if not args:
+            await self._send_message(
+                chat_id,
+                "用法: /skills sources | /skills list [source] | /skills installed "
+                "| /skills install <source> <name> | /skills add-source <name> <repo> <path> [ref] [token_env]",
+            )
+            return
+
+        action = args[0]
+        if action == "installed":
+            installed = list_installed_skills()
+            if not installed:
+                await self._send_message(chat_id, "暂无已安装技能。")
+                return
+            lines = ["已安装技能:"]
+            for entry in installed:
+                desc = f" - {entry.description}" if entry.description else ""
+                lines.append(f"- {entry.name}{desc}")
+            await self._send_message(chat_id, "\n".join(lines))
+            return
+
+        if action == "sources":
+            sources = self._config.skills.sources
+            if not sources:
+                await self._send_message(chat_id, "未配置 skills sources。")
+                return
+            lines = ["已配置 sources:"]
+            for src in sources:
+                ref = f"@{src.ref}" if src.ref else ""
+                lines.append(f"- {src.name}: {src.type} {src.repo}/{src.path}{ref}")
+            await self._send_message(chat_id, "\n".join(lines))
+            return
+
+        if action == "list":
+            sources = self._config.skills.sources
+            if not sources:
+                await self._send_message(chat_id, "未配置 skills sources。")
+                return
+            source_name = args[1] if len(args) > 1 else None
+            try:
+                remote = await list_remote_skills(sources, source_name=source_name)
+            except SkillError as exc:
+                await self._send_message(chat_id, f"skills 列表获取失败: {exc}")
+                return
+            if not remote:
+                await self._send_message(chat_id, "未找到可用技能。")
+                return
+            installed_names = {entry.name for entry in list_installed_skills()}
+            grouped: dict[str, list[str]] = {}
+            for entry in remote:
+                label = entry.source
+                name = entry.name
+                if name in installed_names:
+                    name = f"{name} (已安装)"
+                grouped.setdefault(label, []).append(name)
+            lines = ["可用技能:"]
+            for label, items in grouped.items():
+                lines.append(f"[{label}] {', '.join(items)}")
+            await self._send_message(chat_id, "\n".join(lines))
+            return
+
+        if action == "install":
+            if len(args) < 3:
+                await self._send_message(chat_id, "用法: /skills install <source> <name>")
+                return
+            source_name = args[1]
+            skill_name = args[2]
+            try:
+                dest = await install_skill(self._config.skills.sources, source_name, skill_name)
+            except SkillError as exc:
+                await self._send_message(chat_id, f"安装失败: {exc}")
+                return
+            await self._send_message(chat_id, f"已安装 {skill_name} -> {dest}")
+            return
+
+        if action == "add-source":
+            if len(args) < 4:
+                await self._send_message(
+                    chat_id,
+                    "用法: /skills add-source <name> <repo> <path> [ref] [token_env]",
+                )
+                return
+            if not self._config.config_path:
+                await self._send_message(chat_id, "未找到配置路径，无法持久化 source。")
+                return
+            name = args[1].strip()
+            repo = args[2].strip()
+            path = args[3].strip()
+            ref = args[4].strip() if len(args) > 4 else None
+            token_env = args[5].strip() if len(args) > 5 else None
+            if not name or not repo or not path:
+                await self._send_message(
+                    chat_id,
+                    "用法: /skills add-source <name> <repo> <path> [ref] [token_env]",
+                )
+                return
+            source = SkillSourceConfig(
+                name=name,
+                type="github",
+                repo=repo,
+                path=path,
+                ref=ref or None,
+                token_env=token_env or None,
+            )
+            try:
+                updated = persist_skill_source(self._config.config_path, source)
+            except Exception as exc:
+                await self._send_message(chat_id, f"写入配置失败: {exc}")
+                return
+
+            replaced = False
+            for idx, entry in enumerate(self._config.skills.sources):
+                if entry.name == name:
+                    self._config.skills.sources[idx] = source
+                    replaced = True
+                    break
+            if not replaced:
+                self._config.skills.sources.append(source)
+
+            action_label = "已更新" if updated else "已添加"
+            await self._send_message(chat_id, f"{action_label} source: {name}")
+            return
+
+        await self._send_message(chat_id, "未知 skills 子命令。")
+
     async def _on_trigger(self, event: Event) -> None:
         payload = event.payload
         trigger_type = payload.get("type")
@@ -439,6 +639,8 @@ class JarvisApp:
         item_type = payload.get("type")
         if item_type != "function_call":
             return
+        if not self._show_tool_messages(chat_id):
+            return
         tool_name = payload.get("name", "")
         arguments = payload.get("arguments", "")
         tool_display = self._format_tool_call(tool_name, arguments)
@@ -450,11 +652,15 @@ class JarvisApp:
             await self._handle_item_reasoning(chat_id, item)
             return
         if item_type == "command_execution":
+            if not self._show_tool_messages(chat_id):
+                return
             command = item.get("command", "")
             if command:
                 await self._send_markdown(chat_id, _format_code_block("⚙️ 执行命令", command))
             return
         if item_type == "tool_use":
+            if not self._show_tool_messages(chat_id):
+                return
             tool_name = item.get("name", "")
             tool_input = item.get("input", {})
             if tool_name:
@@ -513,7 +719,7 @@ class JarvisApp:
         stripped = text.lstrip()
         if stripped.startswith(prefix) or stripped.startswith(bare_prefix):
             return text
-        return f"{prefix}\n{text}"
+        return f"{prefix}\n\n{text}"
 
 
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")

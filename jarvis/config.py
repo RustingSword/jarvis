@@ -69,12 +69,35 @@ class LoggingConfig:
 
 
 @dataclass(slots=True)
+class OutputConfig:
+    verbosity: str = "full"
+
+
+@dataclass(slots=True)
+class SkillSourceConfig:
+    name: str
+    type: str = "github"
+    repo: str = ""
+    path: str = ""
+    ref: str | None = None
+    token_env: str | None = None
+
+
+@dataclass(slots=True)
+class SkillsConfig:
+    sources: list[SkillSourceConfig]
+
+
+@dataclass(slots=True)
 class AppConfig:
     telegram: TelegramConfig
     codex: CodexConfig
     storage: StorageConfig
     logging: LoggingConfig
     triggers: TriggersConfig
+    output: OutputConfig
+    skills: SkillsConfig
+    config_path: str | None = None
 
 
 class ConfigError(RuntimeError):
@@ -97,7 +120,9 @@ def load_config(path: str | Path) -> AppConfig:
     codex_raw = _require(data, "codex")
     storage_raw = _require(data, "storage")
     logging_raw = data.get("logging", {})
+    output_raw = data.get("output", {})
     triggers_raw = data.get("triggers", {})
+    skills_raw = data.get("skills", {})
 
     app_config = AppConfig(
         telegram=TelegramConfig(token=_require(telegram_raw, "token")),
@@ -118,7 +143,12 @@ def load_config(path: str | Path) -> AppConfig:
             max_bytes=int(logging_raw.get("max_bytes", 10 * 1024 * 1024)),
             backup_count=int(logging_raw.get("backup_count", 5)),
         ),
+        output=OutputConfig(
+            verbosity=str(output_raw.get("verbosity", "full")),
+        ),
         triggers=_parse_triggers(triggers_raw),
+        skills=_parse_skills(skills_raw),
+        config_path=str(config_path),
     )
     return _apply_env_overrides(app_config)
 
@@ -162,6 +192,10 @@ def _apply_env_overrides(config: AppConfig) -> AppConfig:
     if log_file:
         config.logging.file = log_file
 
+    verbosity = os.getenv("JARVIS_VERBOSITY")
+    if verbosity:
+        config.output.verbosity = verbosity
+
     return config
 
 
@@ -200,6 +234,65 @@ def _parse_triggers(raw: Any) -> TriggersConfig:
         token=_optional_str(webhook_raw.get("token")),
     )
     return TriggersConfig(scheduler=scheduler, monitors=monitors, webhook=webhook)
+
+
+def _parse_skills(raw: Any) -> SkillsConfig:
+    if not isinstance(raw, dict):
+        raw = {}
+    sources_raw = raw.get("sources", []) or []
+    sources: list[SkillSourceConfig] = []
+    for entry in sources_raw:
+        if not isinstance(entry, dict):
+            continue
+        sources.append(
+            SkillSourceConfig(
+                name=str(entry.get("name", "")),
+                type=str(entry.get("type", "github")),
+                repo=str(entry.get("repo", "")),
+                path=str(entry.get("path", "")),
+                ref=_optional_str(entry.get("ref")),
+                token_env=_optional_str(entry.get("token_env")),
+            )
+        )
+    return SkillsConfig(sources=sources)
+
+
+def persist_skill_source(config_path: str, source: SkillSourceConfig) -> bool:
+    path = Path(config_path).expanduser()
+    data = yaml.safe_load(path.read_text()) or {}
+    if not isinstance(data, dict):
+        raise ConfigError("Config file root must be a mapping")
+    skills = data.get("skills")
+    if not isinstance(skills, dict):
+        skills = {}
+        data["skills"] = skills
+    sources = skills.get("sources")
+    if not isinstance(sources, list):
+        sources = []
+        skills["sources"] = sources
+
+    payload = {
+        "name": source.name,
+        "type": source.type,
+        "repo": source.repo,
+        "path": source.path,
+    }
+    if source.ref:
+        payload["ref"] = source.ref
+    if source.token_env:
+        payload["token_env"] = source.token_env
+
+    updated = False
+    for idx, entry in enumerate(sources):
+        if isinstance(entry, dict) and entry.get("name") == source.name:
+            sources[idx] = payload
+            updated = True
+            break
+    if not updated:
+        sources.append(payload)
+
+    path.write_text(yaml.safe_dump(data, sort_keys=False, allow_unicode=True))
+    return updated
 
 
 def _optional_str(value: Any) -> str | None:

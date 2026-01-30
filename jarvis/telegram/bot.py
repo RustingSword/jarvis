@@ -21,8 +21,10 @@ COMMAND_SPECS = (
     ("reset", "重置对话上下文"),
     ("compact", "压缩对话历史"),
     ("resume", "恢复历史会话"),
+    ("verbosity", "设置输出详细程度"),
     ("task", "创建或管理任务"),
     ("remind", "设置提醒"),
+    ("skills", "查看或安装技能"),
 )
 
 

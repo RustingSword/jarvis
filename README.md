@@ -90,6 +90,8 @@ sudo journalctl -u jarvis -f
 - `/help` - 查看帮助
 - `/reset` - 重置会话
 - `/compact` - 压缩会话上下文
+- `/skills` - 查看/安装/添加数据源（`/skills sources|list|installed|install|add-source`）
+- `/verbosity <full|compact|reset>` - 输出详细程度
 
 ### 任务管理
 - `/task add <描述>` - 添加任务
@@ -126,6 +128,9 @@ logging:
   max_bytes: 10485760
   backup_count: 5
 
+output:
+  verbosity: "full"  # full: 输出工具调用与思考; compact: 仅输出思考和最终结果
+
 triggers:
   scheduler:
     - name: "daily_summary"
@@ -145,6 +150,15 @@ triggers:
     host: "0.0.0.0"
     port: 8080
     token: "CHANGE_ME"
+
+skills:
+  sources:
+    - name: "openai-curated"
+      type: "github"
+      repo: "openai/skills"
+      path: "skills/.curated"
+      ref: "main"
+      token_env: "GITHUB_TOKEN"
 ```
 
 ### 环境变量（.env）
@@ -166,6 +180,9 @@ WEBHOOK_PORT=8080
 
 JARVIS_LOG_LEVEL=INFO
 JARVIS_LOG_FILE=~/.jarvis/jarvis.log
+
+# 输出信息详细程度
+JARVIS_VERBOSITY=full
 ```
 
 ## 工具脚本
