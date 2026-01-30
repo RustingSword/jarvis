@@ -63,5 +63,8 @@ class MessagePipeline:
         if result.thread_id:
             await self._storage.upsert_session(chat_id, result.thread_id)
 
+        if result.media:
+            await self._messenger.send_media(chat_id, result.media)
+
         response_text = result.response_text or "(无可用回复)"
         await self._messenger.send_markdown(chat_id, response_text)

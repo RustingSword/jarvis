@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+import re
+import sqlite3
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -117,16 +119,28 @@ class MemoryManager:
         if not fts_query:
             return []
         limit = max_results or self._config.max_results
-        rows = await self._fetchall(
-            """
-            SELECT path, start_line, end_line, text, bm25(chunks_fts) AS rank
-            FROM chunks_fts
-            WHERE chunks_fts MATCH ?
-            ORDER BY rank ASC
-            LIMIT ?
-            """,
-            (fts_query, limit),
-        )
+        try:
+            rows = await self._fetchall(
+                """
+                SELECT path, start_line, end_line, text, bm25(chunks_fts) AS rank
+                FROM chunks_fts
+                WHERE chunks_fts MATCH ?
+                ORDER BY rank ASC
+                LIMIT ?
+                """,
+                (fts_query, limit),
+            )
+        except sqlite3.OperationalError as exc:
+            logger.warning("FTS query failed; fallback to LIKE search: %s", exc)
+            rows = await self._fetchall(
+                """
+                SELECT path, start_line, end_line, text, 0.0 AS rank
+                FROM chunks
+                WHERE text LIKE ?
+                LIMIT ?
+                """,
+                (f"%{cleaned}%", limit),
+            )
         results: list[MemorySearchResult] = []
         for path, start_line, end_line, text, rank in rows:
             snippet = _truncate_text(text, self._config.snippet_chars)
@@ -482,10 +496,14 @@ def _chunk_text(content: str, max_chars: int) -> list[MemoryChunk]:
 
 
 def _build_fts_query(query: str) -> str:
-    terms = [term for term in query.replace('"', " ").split() if term]
+    terms = [term for term in re.split(r"\s+", query.strip()) if term]
     if not terms:
         return ""
-    return " AND ".join(terms)
+    safe_terms = []
+    for term in terms:
+        escaped = term.replace('"', '""')
+        safe_terms.append(f'"{escaped}"')
+    return " AND ".join(safe_terms)
 
 
 def _bm25_rank_to_score(rank: float) -> float:

@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
+from pathlib import Path
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Iterable, List, Optional
 
@@ -19,6 +21,7 @@ class CodexResult:
     thread_id: Optional[str]
     response_text: str
     events: List[dict[str, Any]]
+    media: List[dict[str, Any]]
 
 
 class CodexError(RuntimeError):
@@ -102,11 +105,13 @@ class CodexManager:
 
         thread_id = _extract_thread_id(events)
         response_text = _extract_response_text(events)
+        media = _extract_media(events, response_text, _expand_user(self._config.workspace_dir))
+        response_text = _strip_media_markers(response_text)
 
         if proc.returncode != 0:
             raise CodexProcessError(f"Codex exited with code {proc.returncode}: {stderr_text}")
 
-        return CodexResult(thread_id=thread_id, response_text=response_text, events=events)
+        return CodexResult(thread_id=thread_id, response_text=response_text, events=events, media=media)
 
     async def _read_stdout_with_callback(
         self,
@@ -249,3 +254,90 @@ def _coerce_text(value: Any) -> str:
         parts = [item.get("text") for item in value if isinstance(item, dict) and item.get("text")]
         return "".join(parts)
     return ""
+
+
+_MEDIA_EXT_PHOTO = {"png", "jpg", "jpeg", "gif", "webp"}
+_MEDIA_SCHEME = "send_to_user://"
+_MEDIA_MARKER_RE = re.compile(r"send_to_user://(?P<path>[^\s`'\"<>]+)", re.IGNORECASE)
+
+
+def _extract_media(
+    events: Iterable[dict[str, Any]],
+    response_text: str,
+    workspace_dir: str,
+) -> List[dict[str, Any]]:
+    media: List[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    for path in _find_marked_media_paths(response_text, workspace_dir):
+        if path in seen:
+            continue
+        seen.add(path)
+        media.append(_media_item_from_path(path))
+
+    for event in events:
+        for value in _iter_string_values(event):
+            for path in _find_marked_media_paths(value, workspace_dir):
+                if path in seen:
+                    continue
+                seen.add(path)
+                media.append(_media_item_from_path(path))
+
+    return media
+
+
+def _find_marked_media_paths(text: str, workspace_dir: str) -> List[str]:
+    if not text:
+        return []
+    results: List[str] = []
+    for match in _MEDIA_MARKER_RE.finditer(text):
+        raw = match.group("path").strip().rstrip(").,;")
+        resolved = _resolve_media_path(raw, workspace_dir)
+        if resolved:
+            results.append(resolved)
+    return results
+
+
+def _resolve_media_path(raw: str, workspace_dir: str) -> str | None:
+    if not raw:
+        return None
+    candidate = Path(raw).expanduser()
+    if not candidate.is_absolute():
+        candidate = (Path(workspace_dir) / candidate).resolve()
+    else:
+        candidate = candidate.resolve()
+    if not candidate.exists() or candidate.is_dir():
+        return None
+    return str(candidate)
+
+
+def _media_item_from_path(path: str) -> dict[str, Any]:
+    ext = Path(path).suffix.lower().lstrip(".")
+    if ext in _MEDIA_EXT_PHOTO:
+        kind = "photo"
+    else:
+        kind = "document"
+    return {"type": kind, "path": path}
+
+
+def _iter_string_values(value: Any) -> List[str]:
+    results: List[str] = []
+    stack = [value]
+    while stack:
+        item = stack.pop()
+        if isinstance(item, str):
+            results.append(item)
+        elif isinstance(item, dict):
+            stack.extend(item.values())
+        elif isinstance(item, list):
+            stack.extend(item)
+    return results
+
+
+def _strip_media_markers(text: str) -> str:
+    if not text:
+        return text
+    cleaned = _MEDIA_MARKER_RE.sub("", text)
+    cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    return cleaned.strip()
