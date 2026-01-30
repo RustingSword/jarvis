@@ -3,6 +3,7 @@ __pycache__/
 *.log
 memory/
 AGENTS.md
+*.egg-info/
 
 # Local artifacts
 chat.png

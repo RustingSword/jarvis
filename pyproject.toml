@@ -17,6 +17,7 @@ dependencies = [
   "APScheduler>=3.10.4",
   "aiohttp>=3.9.5",
   "psutil>=5.9.8",
+  "telegramify-markdown>=0.5.4",
 ]
 
 [project.scripts]
