@@ -102,6 +102,7 @@ sudo journalctl -u jarvis -f
 - `/remind <YYYY-MM-DD HH:MM> <内容>` - 添加提醒
 - `/remind list` - 查看提醒列表
 - `/remind cancel <id>` - 取消提醒
+- `/memory search <关键词>` | `/memory add <内容>` | `/memory get <path> [from] [lines]` | `/memory index` | `/memory status` - 记忆功能
 
 ## 配置说明
 
@@ -123,6 +124,15 @@ codex:
 storage:
   db_path: "~/.jarvis/jarvis.db"  # 数据库路径
   session_dir: "~/.jarvis/sessions"  # 会话存储目录
+
+memory:
+  enabled: true
+  workspace_dir: "~/workspace"
+  db_path: "~/.jarvis/memory.sqlite"
+  max_results: 6
+  chunk_chars: 1600
+  snippet_chars: 700
+  extra_paths: []
 
 logging:
   level: "INFO"

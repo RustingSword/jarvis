@@ -14,6 +14,15 @@ storage:
   db_path: "~/.jarvis/jarvis.db"
   session_dir: "~/.jarvis/sessions"
 
+memory:
+  enabled: true
+  workspace_dir: "~/workspace"
+  db_path: "~/.jarvis/memory.sqlite"
+  max_results: 6
+  chunk_chars: 1600
+  snippet_chars: 700
+  extra_paths: []
+
 logging:
   level: "INFO"
   file: "~/.jarvis/jarvis.log"

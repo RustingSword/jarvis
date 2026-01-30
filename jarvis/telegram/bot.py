@@ -25,6 +25,7 @@ COMMAND_SPECS = (
     ("task", "创建或管理任务"),
     ("remind", "设置提醒"),
     ("skills", "查看或安装技能"),
+    ("memory", "记忆搜索与写入"),
 )
 
 

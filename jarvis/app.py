@@ -5,11 +5,12 @@ import json
 import logging
 import re
 from collections.abc import Awaitable, Callable
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from jarvis.codex import CodexError, CodexProcessError, CodexTimeoutError, CodexManager
 from jarvis.config import AppConfig, SkillSourceConfig, persist_skill_source
 from jarvis.event_bus import Event, EventBus
+from jarvis.memory import MemoryManager
 from jarvis.skills import SkillError, install_skill, list_installed_skills, list_remote_skills
 from jarvis.storage import ReminderRecord, Storage, TaskRecord
 from jarvis.telegram import TelegramBot
@@ -51,6 +52,7 @@ class JarvisApp:
         self._event_bus = EventBus()
         self._storage = Storage(config.storage)
         self._codex = CodexManager(config.codex)
+        self._memory = MemoryManager(config.memory)
         self._telegram = TelegramBot(config.telegram, self._event_bus)
         self._triggers = TriggerManager(self._event_bus, self._storage, config.triggers)
         self._default_verbosity = (config.output.verbosity or "full").lower()
@@ -70,6 +72,7 @@ class JarvisApp:
             "task": self._cmd_task,
             "remind": self._cmd_remind,
             "skills": self._cmd_skills,
+            "memory": self._cmd_memory,
         }
         self._trigger_handlers: dict[str, TriggerHandler] = {
             "reminder": self._handle_reminder_trigger,
@@ -84,6 +87,7 @@ class JarvisApp:
 
     async def start(self) -> None:
         await self._storage.connect()
+        await self._memory.connect()
         await self._triggers.start()
         await self._telegram.start()
         await self._send_startup_message()
@@ -95,6 +99,7 @@ class JarvisApp:
         await self._telegram.stop()
         await self._triggers.stop()
         await self._stop_workers()
+        await self._memory.close()
         await self._storage.close()
 
     async def _idle(self) -> None:
@@ -176,7 +181,8 @@ class JarvisApp:
             await self._handle_codex_progress(chat_id, codex_event)
 
         try:
-            result = await self._codex.run(text, session_id=thread_id, progress_callback=progress_callback)
+            prompt = await self._augment_with_memory(text)
+            result = await self._codex.run(prompt, session_id=thread_id, progress_callback=progress_callback)
         except CodexTimeoutError:
             logger.warning("Codex timed out")
             await self._send_message(chat_id, "Codex 调用超时，请稍后再试。")
@@ -192,6 +198,26 @@ class JarvisApp:
         response_text = result.response_text or "(无可用回复)"
         # 直接发送 Codex 返回的 markdown 内容
         await self._send_markdown(chat_id, response_text)
+
+    async def _augment_with_memory(self, text: str) -> str:
+        if not self._memory.enabled:
+            return text
+        try:
+            results = await self._memory.search(text)
+        except Exception:
+            logger.exception("Memory search failed")
+            return text
+        if not results:
+            return text
+        lines = ["以下是可能相关的记忆片段（仅供参考）："]
+        for idx, item in enumerate(results, start=1):
+            lines.append(
+                f"{idx}. {item.path}#L{item.start_line}-L{item.end_line}: {item.snippet}"
+            )
+        lines.append("")
+        lines.append("用户消息：")
+        lines.append(text)
+        return "\n".join(lines)
 
     async def _handle_codex_progress(self, chat_id: str, event: dict) -> None:
         """处理 Codex 进度事件，发送有价值的信息到 Telegram"""
@@ -342,6 +368,8 @@ class JarvisApp:
                     "- `/remind <YYYY-MM-DD HH:MM> <内容>` | `/remind list` | `/remind cancel <id>` - 提醒",
                     "- `/skills sources` | `/skills list [source]` | `/skills installed` | "
                     "`/skills install <source> <name>` | `/skills add-source <name> <repo> <path> [ref] [token_env]` - skills 管理",
+                    "- `/memory search <关键词>` | `/memory add <内容>` | `/memory get <path> [from] [lines]` | "
+                    "`/memory index` | `/memory status` - 记忆功能",
                     "",
                     "提示：每条消息前会显示会话标识，如 `> [12]`。",
                 ]
@@ -436,6 +464,12 @@ class JarvisApp:
             await self._send_markdown(chat_id, "未获取到摘要内容，压缩失败。")
             return
 
+        try:
+            await self._memory.append_daily_block(summary, title="compact")
+            await self._memory.sync()
+        except Exception:
+            logger.exception("Failed to write compact summary to memory")
+
         await self._storage.save_summary(chat_id, summary)
         await self._storage.clear_session(chat_id)
 
@@ -449,6 +483,10 @@ class JarvisApp:
             await self._storage.upsert_session(chat_id, seed_result.thread_id)
 
         await self._send_markdown(chat_id, "会话已压缩并重置。")
+        try:
+            await self._maybe_consolidate_yesterday_memory()
+        except Exception:
+            logger.exception("Failed to consolidate yesterday memory")
 
     async def _cmd_task(self, chat_id: str, args: list[str]) -> None:
         if not args:
@@ -643,6 +681,146 @@ class JarvisApp:
             return
 
         await self._send_markdown(chat_id, "未知 skills 子命令。")
+
+    async def _cmd_memory(self, chat_id: str, args: list[str]) -> None:
+        if not self._memory.enabled:
+            await self._send_markdown(chat_id, "记忆功能已禁用。")
+            return
+        if not args:
+            await self._send_markdown(
+                chat_id,
+                "**用法**: `/memory search <关键词>` | `/memory add <内容>` | "
+                "`/memory get <path> [from] [lines]` | `/memory index` | `/memory status`",
+            )
+            return
+        action = args[0].strip().lower()
+        if action == "search":
+            query = " ".join(args[1:]).strip()
+            if not query:
+                await self._send_markdown(chat_id, "**用法**: `/memory search <关键词>`")
+                return
+            try:
+                results = await self._memory.search(query)
+            except Exception:
+                logger.exception("Memory search failed")
+                await self._send_markdown(chat_id, "记忆搜索失败。")
+                return
+            if not results:
+                await self._send_markdown(chat_id, "没有找到相关记忆。")
+                return
+            lines = ["**搜索结果**:"]
+            for item in results:
+                lines.append(
+                    f"- `{item.path}` L{item.start_line}-L{item.end_line}: {item.snippet}"
+                )
+            await self._send_markdown(chat_id, "\n".join(lines))
+            return
+
+        if action == "add":
+            content = " ".join(args[1:]).strip()
+            if not content:
+                await self._send_markdown(chat_id, "**用法**: `/memory add <内容>`")
+                return
+            try:
+                path = await self._memory.append_daily(content)
+                await self._memory.sync()
+            except Exception:
+                logger.exception("Memory append failed")
+                await self._send_markdown(chat_id, "记忆写入失败。")
+                return
+            if path:
+                await self._send_markdown(chat_id, f"已写入记忆：`{path}`")
+            else:
+                await self._send_markdown(chat_id, "未写入内容。")
+            return
+
+        if action == "get":
+            if len(args) < 2:
+                await self._send_markdown(
+                    chat_id, "**用法**: `/memory get <path> [from] [lines]`"
+                )
+                return
+            path = args[1]
+            from_line = None
+            lines_count = None
+            if len(args) >= 3 and args[2].isdigit():
+                from_line = int(args[2])
+            if len(args) >= 4 and args[3].isdigit():
+                lines_count = int(args[3])
+            try:
+                snippet = await self._memory.read_snippet(path, from_line, lines_count)
+            except Exception:
+                logger.exception("Memory read failed")
+                await self._send_markdown(chat_id, "记忆读取失败。")
+                return
+            await self._send_markdown(chat_id, _format_code_block(f"📄 {path}", snippet))
+            return
+
+        if action == "index":
+            try:
+                await self._memory.sync(force=True)
+            except Exception:
+                logger.exception("Memory reindex failed")
+                await self._send_markdown(chat_id, "记忆索引失败。")
+                return
+            await self._send_markdown(chat_id, "记忆索引已更新。")
+            return
+
+        if action == "status":
+            try:
+                stats = await self._memory.status()
+            except Exception:
+                logger.exception("Memory status failed")
+                await self._send_markdown(chat_id, "记忆状态获取失败。")
+                return
+            await self._send_markdown(
+                chat_id, f"**记忆状态**\n- files: {stats['files']}\n- chunks: {stats['chunks']}"
+            )
+            return
+
+        await self._send_markdown(chat_id, "未知 memory 子命令。")
+
+    async def _maybe_consolidate_yesterday_memory(self) -> None:
+        if not self._memory.enabled:
+            return
+        workspace = self._memory.workspace_dir
+        memory_dir = workspace / "memory"
+        memory_dir.mkdir(parents=True, exist_ok=True)
+        state_path = memory_dir / ".state.json"
+        state = {}
+        if state_path.exists():
+            try:
+                state = json.loads(state_path.read_text(encoding="utf-8")) or {}
+            except Exception:
+                state = {}
+        yesterday = (datetime.now() - timedelta(days=1)).date().isoformat()
+        if state.get("last_consolidated") == yesterday:
+            return
+        yesterday_path = memory_dir / f"{yesterday}.md"
+        if not yesterday_path.exists():
+            return
+        raw = yesterday_path.read_text(encoding="utf-8").strip()
+        if not raw:
+            state["last_consolidated"] = yesterday
+            state_path.write_text(json.dumps(state, ensure_ascii=False, indent=2))
+            return
+        content = _truncate_text(raw, 4000)
+        prompt = (
+            "你是 Jarvis 的记忆整理器。请从下面的“昨日记忆”中提炼适合长期记忆的要点，"
+            "输出 3-8 条精炼的项目符号（每条不超过 30 字）。"
+            "如果没有值得长期保留的内容，输出 NO_UPDATE。\n\n"
+            f"昨日记忆（{yesterday}）:\n{content}\n"
+        )
+        result = await self._codex.run(prompt)
+        response = (result.response_text or "").strip()
+        if not response or response.upper().startswith("NO_UPDATE"):
+            state["last_consolidated"] = yesterday
+            state_path.write_text(json.dumps(state, ensure_ascii=False, indent=2))
+            return
+        await self._memory.append_global_block(response, title=f"{yesterday} consolidate")
+        await self._memory.sync()
+        state["last_consolidated"] = yesterday
+        state_path.write_text(json.dumps(state, ensure_ascii=False, indent=2))
 
     async def _on_trigger(self, event: Event) -> None:
         payload = event.payload
@@ -870,3 +1048,10 @@ def _format_code_block(label: str, content: str) -> str:
 
 def _format_tool_path(label: str, value: str) -> str:
     return f"{label}\n{value}"
+
+
+def _truncate_text(text: str, max_chars: int) -> str:
+    limit = max(50, max_chars)
+    if len(text) <= limit:
+        return text
+    return text[:limit].rstrip() + "\n...(truncated)"

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import os
 from pathlib import Path
 from typing import Any
@@ -63,6 +63,17 @@ class StorageConfig:
 
 
 @dataclass(slots=True)
+class MemoryConfig:
+    enabled: bool = True
+    workspace_dir: str = ""
+    db_path: str = "~/.jarvis/memory.sqlite"
+    max_results: int = 6
+    chunk_chars: int = 1600
+    snippet_chars: int = 700
+    extra_paths: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
 class LoggingConfig:
     level: str = "INFO"
     file: str | None = None
@@ -95,6 +106,7 @@ class AppConfig:
     telegram: TelegramConfig
     codex: CodexConfig
     storage: StorageConfig
+    memory: MemoryConfig
     logging: LoggingConfig
     triggers: TriggersConfig
     output: OutputConfig
@@ -121,6 +133,7 @@ def load_config(path: str | Path) -> AppConfig:
     telegram_raw = _require(data, "telegram")
     codex_raw = _require(data, "codex")
     storage_raw = _require(data, "storage")
+    memory_raw = data.get("memory", {}) or {}
     logging_raw = data.get("logging", {})
     output_raw = data.get("output", {})
     triggers_raw = data.get("triggers", {})
@@ -143,6 +156,7 @@ def load_config(path: str | Path) -> AppConfig:
             db_path=_require(storage_raw, "db_path"),
             session_dir=_require(storage_raw, "session_dir"),
         ),
+        memory=_parse_memory(memory_raw, codex_raw),
         logging=LoggingConfig(
             level=logging_raw.get("level", "INFO"),
             file=logging_raw.get("file"),
@@ -183,6 +197,12 @@ def _apply_env_overrides(config: AppConfig) -> AppConfig:
     session_dir = os.getenv("JARVIS_SESSION_DIR")
     if session_dir:
         config.storage.session_dir = session_dir
+    memory_db = os.getenv("JARVIS_MEMORY_DB_PATH")
+    if memory_db:
+        config.memory.db_path = memory_db
+    memory_workspace = os.getenv("JARVIS_MEMORY_WORKSPACE")
+    if memory_workspace:
+        config.memory.workspace_dir = memory_workspace
 
     webhook_token = os.getenv("WEBHOOK_TOKEN")
     if webhook_token:
@@ -246,6 +266,23 @@ def _parse_triggers(raw: Any) -> TriggersConfig:
         token=_optional_str(webhook_raw.get("token")),
     )
     return TriggersConfig(scheduler=scheduler, monitors=monitors, webhook=webhook)
+
+
+def _parse_memory(raw: Any, codex_raw: dict[str, Any]) -> MemoryConfig:
+    if not isinstance(raw, dict):
+        raw = {}
+    workspace = raw.get("workspace_dir") or codex_raw.get("workspace_dir") or ""
+    extra_raw = raw.get("extra_paths", []) or []
+    extra_paths = [str(item) for item in extra_raw if isinstance(item, (str, bytes))]
+    return MemoryConfig(
+        enabled=bool(raw.get("enabled", True)),
+        workspace_dir=str(workspace),
+        db_path=str(raw.get("db_path", "~/.jarvis/memory.sqlite")),
+        max_results=int(raw.get("max_results", 6)),
+        chunk_chars=int(raw.get("chunk_chars", 1600)),
+        snippet_chars=int(raw.get("snippet_chars", 700)),
+        extra_paths=extra_paths,
+    )
 
 
 def _parse_skills(raw: Any) -> SkillsConfig:
