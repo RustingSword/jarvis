@@ -86,6 +86,7 @@ class JarvisApp:
         await self._storage.connect()
         await self._triggers.start()
         await self._telegram.start()
+        await self._send_startup_message()
         self._message_worker_task = asyncio.create_task(self._message_worker(), name="message-worker")
         self._command_worker_task = asyncio.create_task(self._command_worker(), name="command-worker")
         await self._idle()
@@ -100,6 +101,21 @@ class JarvisApp:
         logger.info("Jarvis app running")
         stop_event = asyncio.Event()
         await stop_event.wait()
+
+    async def _send_startup_message(self) -> None:
+        message = (self._config.telegram.startup_message or "").strip()
+        chat_id_raw = (self._config.telegram.startup_chat_id or "").strip()
+        if not message or not chat_id_raw:
+            logger.info("Startup message skipped (missing chat_id or message)")
+            return
+        chat_ids = [item.strip() for item in chat_id_raw.split(",") if item.strip()]
+        for chat_id in chat_ids:
+            await self._send_message(
+                chat_id,
+                message,
+                with_separator=False,
+                with_session_prefix=False,
+            )
 
     async def _enqueue_message(self, event: Event) -> None:
         await self._message_queue.put(event)
@@ -315,19 +331,19 @@ class JarvisApp:
             chat_id,
             "\n".join(
                 [
-                    "可用命令:",
-                    "/start - 启动对话",
-                    "/help - 显示帮助",
-                    "/reset - 重置当前对话上下文",
-                    "/compact - 压缩对话历史并重置",
-                    "/resume <id> - 恢复历史会话（不带 id 会列出最近会话）",
-                    "/verbosity <full|compact|reset> - 控制输出详细程度",
-                    "/task add <描述> | /task list | /task done <id> - 任务管理",
-                    "/remind <YYYY-MM-DD HH:MM> <内容> | /remind list | /remind cancel <id> - 提醒",
-                    "/skills sources | /skills list [source] | /skills installed | "
-                    "/skills install <source> <name> | /skills add-source <name> <repo> <path> [ref] [token_env] - skills 管理",
+                    "**可用命令**",
+                    "- `/start` - 启动对话",
+                    "- `/help` - 显示帮助",
+                    "- `/reset` - 重置当前对话上下文",
+                    "- `/compact` - 压缩对话历史并重置",
+                    "- `/resume <id>` - 恢复历史会话（不带 id 会列出最近会话）",
+                    "- `/verbosity <full|compact|reset>` - 控制输出详细程度",
+                    "- `/task add <描述>` | `/task list` | `/task done <id>` - 任务管理",
+                    "- `/remind <YYYY-MM-DD HH:MM> <内容>` | `/remind list` | `/remind cancel <id>` - 提醒",
+                    "- `/skills sources` | `/skills list [source]` | `/skills installed` | "
+                    "`/skills install <source> <name>` | `/skills add-source <name> <repo> <path> [ref] [token_env]` - skills 管理",
                     "",
-                    "提示：每条消息前会显示会话标识，如 > [12]。",
+                    "提示：每条消息前会显示会话标识，如 `> [12]`。",
                 ]
             ),
         )
@@ -345,7 +361,7 @@ class JarvisApp:
             if not sessions:
                 await self._send_markdown(chat_id, "暂无可恢复的会话。")
                 return
-            lines = ["用法: /resume <id>", "最近会话:"]
+            lines = ["**用法**: `/resume <id>`", "**最近会话**:"]
             for session in sessions:
                 ts = session.last_active.isoformat(sep=" ", timespec="minutes")
                 lines.append(f"- {session.session_id} (最后活动: {ts})")
@@ -380,7 +396,7 @@ class JarvisApp:
 
         normalized = self._normalize_verbosity(args[0])
         if not normalized:
-            await self._send_markdown(chat_id, "用法: `/verbosity full|compact|reset`")
+            await self._send_markdown(chat_id, "**用法**: `/verbosity full|compact|reset`")
             return
 
         self._verbosity_by_chat[chat_id] = normalized
@@ -409,7 +425,7 @@ class JarvisApp:
             # 如果是 UTF-8 错误，提供更有用的提示
             if "UTF-8" in error_msg:
                 error_msg = (
-                    "会话文件可能已损坏。建议使用 /reset 重置会话。\n"
+                    "会话文件可能已损坏。建议使用 `/reset` 重置会话。\n"
                     f"技术详情: {exc}"
                 )
             await self._send_markdown(chat_id, f"会话压缩失败: {error_msg}")
@@ -436,7 +452,10 @@ class JarvisApp:
 
     async def _cmd_task(self, chat_id: str, args: list[str]) -> None:
         if not args:
-            await self._send_markdown(chat_id, "用法: /task add <描述> | /task list | /task done <id>")
+            await self._send_markdown(
+                chat_id,
+                "**用法**: `/task add <描述>` | `/task list` | `/task done <id>`",
+            )
             return
         action = args[0]
         if action == "add":
@@ -454,7 +473,7 @@ class JarvisApp:
             return
         if action == "done":
             if len(args) < 2 or not args[1].isdigit():
-                await self._send_markdown(chat_id, "用法: /task done <id>")
+                await self._send_markdown(chat_id, "**用法**: `/task done <id>`")
                 return
             task_id = int(args[1])
             ok = await self._storage.complete_task(chat_id, task_id)
@@ -467,7 +486,7 @@ class JarvisApp:
         if not args:
             await self._send_markdown(
                 chat_id,
-                "用法: /remind <YYYY-MM-DD HH:MM> <内容> | /remind list | /remind cancel <id>",
+                "**用法**: `/remind <YYYY-MM-DD HH:MM> <内容>` | `/remind list` | `/remind cancel <id>`",
             )
             return
         action = args[0]
@@ -478,7 +497,7 @@ class JarvisApp:
             return
         if action == "cancel":
             if len(args) < 2 or not args[1].isdigit():
-                await self._send_markdown(chat_id, "用法: /remind cancel <id>")
+                await self._send_markdown(chat_id, "**用法**: `/remind cancel <id>`")
                 return
             reminder_id = int(args[1])
             ok = await self._storage.delete_reminder(chat_id, reminder_id)
@@ -487,7 +506,7 @@ class JarvisApp:
 
         dt, message = _parse_remind_args(args)
         if not dt or not message:
-            await self._send_markdown(chat_id, "用法: /remind <YYYY-MM-DD HH:MM> <内容>")
+            await self._send_markdown(chat_id, "**用法**: `/remind <YYYY-MM-DD HH:MM> <内容>`")
             return
         reminder_id = await self._storage.add_reminder(chat_id, message, dt, None)
         reminder = ReminderRecord(
@@ -563,7 +582,7 @@ class JarvisApp:
 
         if action == "install":
             if len(args) < 3:
-                await self._send_markdown(chat_id, "用法: `/skills install <source> <name>`")
+                await self._send_markdown(chat_id, "**用法**: `/skills install <source> <name>`")
                 return
             source_name = args[1]
             skill_name = args[2]
@@ -579,7 +598,7 @@ class JarvisApp:
             if len(args) < 4:
                 await self._send_markdown(
                     chat_id,
-                    "用法: `/skills add-source <name> <repo> <path> [ref] [token_env]`",
+                    "**用法**: `/skills add-source <name> <repo> <path> [ref] [token_env]`",
                 )
                 return
             if not self._config.config_path:
@@ -593,7 +612,7 @@ class JarvisApp:
             if not name or not repo or not path:
                 await self._send_markdown(
                     chat_id,
-                    "用法: `/skills add-source <name> <repo> <path> [ref] [token_env]`",
+                    "**用法**: `/skills add-source <name> <repo> <path> [ref] [token_env]`",
                 )
                 return
             source = SkillSourceConfig(
@@ -756,8 +775,11 @@ class JarvisApp:
         with_separator: bool = True,
         markdown: bool = False,
         parse_mode: str | None = None,
+        with_session_prefix: bool = True,
     ) -> None:
-        final_text = await self._with_session_prefix(chat_id, text, with_separator=with_separator)
+        final_text = text
+        if with_session_prefix:
+            final_text = await self._with_session_prefix(chat_id, text, with_separator=with_separator)
         payload = {"chat_id": chat_id, "text": final_text}
         if markdown:
             payload["markdown"] = True
@@ -773,12 +795,12 @@ class JarvisApp:
         if not session:
             return text
         bare_prefix = f"[{session.session_id}]"
-        prefix = f"> {bare_prefix}"
+        prefix = f"> Session {bare_prefix}"
         stripped = text.lstrip()
         if stripped.startswith(prefix) or stripped.startswith(bare_prefix):
             return text
         if with_separator:
-            return f"{prefix}\n\n——\n\n{text}"
+            return f"{prefix}\n\n------\n\n{text}"
         return f"{prefix}\n\n{text}"
 
 
@@ -811,21 +833,21 @@ def _parse_datetime(value: str) -> datetime | None:
 
 def _format_tasks(tasks: list[TaskRecord]) -> str:
     if not tasks:
-        return "暂无任务。"
-    lines = ["任务列表:"]
+        return "**暂无任务**"
+    lines = ["**任务列表**"]
     for task in tasks:
         status = "✅" if task.status == "done" else "📝"
-        lines.append(f"{status} [{task.id}] {task.description}")
+        lines.append(f"- {status} `{task.id}` {task.description}")
     return "\n".join(lines)
 
 
 def _format_reminders(reminders: list[ReminderRecord]) -> str:
     if not reminders:
-        return "暂无提醒。"
-    lines = ["提醒列表:"]
+        return "**暂无提醒**"
+    lines = ["**提醒列表**"]
     for reminder in reminders:
         ts = reminder.trigger_time.isoformat(sep=" ", timespec="minutes")
-        lines.append(f"⏰ [{reminder.id}] {ts} {reminder.message}")
+        lines.append(f"- ⏰ `{reminder.id}` `{ts}` {reminder.message}")
     return "\n".join(lines)
 
 

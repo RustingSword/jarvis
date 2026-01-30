@@ -43,6 +43,8 @@ class TriggersConfig:
 @dataclass(slots=True)
 class TelegramConfig:
     token: str
+    startup_chat_id: str | None = None
+    startup_message: str | None = None
 
 
 @dataclass(slots=True)
@@ -125,7 +127,11 @@ def load_config(path: str | Path) -> AppConfig:
     skills_raw = data.get("skills", {})
 
     app_config = AppConfig(
-        telegram=TelegramConfig(token=_require(telegram_raw, "token")),
+        telegram=TelegramConfig(
+            token=_require(telegram_raw, "token"),
+            startup_chat_id=_optional_str(telegram_raw.get("startup_chat_id")),
+            startup_message=_optional_str(telegram_raw.get("startup_message")),
+        ),
         codex=CodexConfig(
             workspace_dir=_require(codex_raw, "workspace_dir"),
             exec_path=codex_raw.get("exec_path", "codex"),
@@ -157,6 +163,12 @@ def _apply_env_overrides(config: AppConfig) -> AppConfig:
     telegram_token = os.getenv("TELEGRAM_TOKEN")
     if telegram_token:
         config.telegram.token = telegram_token
+    startup_chat_id = os.getenv("TELEGRAM_STARTUP_CHAT_ID") or os.getenv("TELEGRAM_CHAT_ID")
+    if startup_chat_id:
+        config.telegram.startup_chat_id = startup_chat_id
+    startup_message = os.getenv("TELEGRAM_STARTUP_MESSAGE")
+    if startup_message:
+        config.telegram.startup_message = startup_message
 
     codex_workspace = os.getenv("CODEX_WORKSPACE_DIR")
     if codex_workspace:

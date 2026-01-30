@@ -110,6 +110,8 @@ sudo journalctl -u jarvis -f
 ```yaml
 telegram:
   token: "YOUR_BOT_TOKEN"  # Telegram Bot Token
+  startup_chat_id: "YOUR_CHAT_ID"  # Jarvis 启动后发送消息的目标聊天
+  startup_message: "Jarvis 已启动。"  # 启动提示内容（为空则不发送）
 
 codex:
   workspace_dir: "~/workspace"  # Codex 工作目录
@@ -167,6 +169,8 @@ skills:
 
 ```bash
 TELEGRAM_TOKEN=your_token_here
+TELEGRAM_STARTUP_CHAT_ID=your_chat_id_here  # 可用 TELEGRAM_CHAT_ID 作为兜底
+TELEGRAM_STARTUP_MESSAGE=Jarvis started.
 
 CODEX_WORKSPACE_DIR=~/workspace
 CODEX_EXEC_PATH=codex

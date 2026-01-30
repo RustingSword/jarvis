@@ -1,5 +1,7 @@
 telegram:
   token: "YOUR_BOT_TOKEN"
+  startup_chat_id: "YOUR_CHAT_ID"
+  startup_message: "Jarvis 已启动。"
 
 codex:
   workspace_dir: "~/workspace"
