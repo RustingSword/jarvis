@@ -18,6 +18,7 @@ _TOOL_CALL_NAME_MAP = {
     "list_directory": "列出目录",
     "web_search": "网络搜索",
     "browser_action": "浏览器操作",
+    "apply_patch": "应用补丁",
 }
 
 _TOOL_USE_NAME_MAP = {
@@ -81,12 +82,36 @@ class CodexProgressHandler:
     async def _handle_response_item(self, chat_id: str, payload: dict) -> None:
         if not self._verbosity.show_tool_messages(chat_id):
             return
-        if payload.get("type") != "function_call":
+        payload_type = payload.get("type")
+        if payload_type == "function_call":
+            tool_name = payload.get("name", "")
+            arguments = payload.get("arguments", "")
+            tool_display = self._format_tool_call(tool_name, arguments)
+            await self._messenger.send_markdown(
+                chat_id,
+                f"🔧 工具\n{tool_display}",
+                with_separator=False,
+            )
             return
-        tool_name = payload.get("name", "")
-        arguments = payload.get("arguments", "")
-        tool_display = self._format_tool_call(tool_name, arguments)
-        await self._messenger.send_markdown(chat_id, f"🔧 工具\n{tool_display}", with_separator=False)
+        if payload_type == "web_search_call":
+            tool_display = self._format_web_search_call(payload.get("action") or {})
+            await self._messenger.send_markdown(
+                chat_id,
+                f"🔧 工具\n{tool_display}",
+                with_separator=False,
+            )
+            return
+        if payload_type == "custom_tool_call":
+            tool_display = self._format_custom_tool_call(
+                payload.get("name", ""),
+                payload.get("input"),
+            )
+            await self._messenger.send_markdown(
+                chat_id,
+                f"🔧 工具\n{tool_display}",
+                with_separator=False,
+            )
+            return
 
     async def _handle_item_completed(self, chat_id: str, item: dict) -> None:
         item_type = item.get("type")
@@ -165,4 +190,48 @@ class CodexProgressHandler:
             return format_tool_path(tool_display, str(tool_input["path"]))
         if "query" in tool_input:
             return format_tool_path(tool_display, str(tool_input["query"]))
+        return tool_display
+
+    def _format_web_search_call(self, action: dict) -> str:
+        action_type = action.get("type") or "unknown"
+        header = f"网络搜索（{action_type}）"
+        if action_type == "search":
+            query = action.get("query") or ""
+            return f"{header}\n搜索: {query}".strip()
+        if action_type == "open_page":
+            url = action.get("url") or ""
+            return f"{header}\n打开页面: {url}".strip()
+        if action_type == "find_in_page":
+            url = action.get("url") or ""
+            pattern = action.get("pattern") or ""
+            return f"{header}\n在 {url} 中查找 {pattern}".strip()
+        return f"{header}\n{json.dumps(action, ensure_ascii=False)}"
+
+    def _format_custom_tool_call(self, tool_name: str, tool_input: object) -> str:
+        tool_display = _TOOL_CALL_NAME_MAP.get(tool_name, tool_name or "自定义工具")
+        if isinstance(tool_input, dict):
+            if "command" in tool_input:
+                cmd = tool_input.get("command")
+                cmd_str = " ".join(cmd) if isinstance(cmd, list) else str(cmd)
+                return format_code_block(tool_display, cmd_str)
+            if "path" in tool_input:
+                return format_tool_path(tool_display, str(tool_input.get("path")))
+            if "file" in tool_input:
+                return format_tool_path(tool_display, str(tool_input.get("file")))
+            if "url" in tool_input:
+                return format_tool_path(tool_display, str(tool_input.get("url")))
+            if "query" in tool_input:
+                return format_tool_path(tool_display, str(tool_input.get("query")))
+            return f"{tool_display}\n{json.dumps(tool_input, ensure_ascii=False)}"
+        if isinstance(tool_input, str) and tool_input:
+            if tool_name == "apply_patch":
+                updated_files = []
+                for line in tool_input.splitlines():
+                    if line.startswith("*** Update File: "):
+                        updated_files.append(line.replace("*** Update File: ", "", 1).strip())
+                if updated_files:
+                    if len(updated_files) == 1:
+                        return f"{tool_display}\n更新文件: {updated_files[0]}"
+                    return f"{tool_display}\n更新文件:\n" + "\n".join(updated_files)
+            return format_code_block(tool_display, tool_input)
         return tool_display
