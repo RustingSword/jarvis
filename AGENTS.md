@@ -44,3 +44,19 @@
 
 ## 安全与权限
 - 不上传或暴露任何本地敏感信息
+
+## 常用操作
+
+```bash
+# 启动/停止/重启/查看状态（本地前台以外方式运行）
+./scripts/run.sh start
+./scripts/run.sh stop
+./scripts/run.sh restart
+./scripts/run.sh status
+
+# 查看日志
+tail -f ~/.jarvis/jarvis.log
+
+# 快速自检（配置 + 存储）
+./scripts/smoke_test.sh
+```

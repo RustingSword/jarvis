@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from jarvis.codex import CodexError, CodexProcessError, CodexTimeoutError, CodexManager
 from jarvis.config import SkillSourceConfig, SkillsConfig, persist_skill_source
@@ -100,7 +100,7 @@ class CommandRouter:
                 return
             lines = ["**用法**: `/resume <id>`", "**最近会话**:"]
             for session in sessions:
-                ts = session.last_active.isoformat(sep=" ", timespec="minutes")
+                ts = _format_local_time(session.last_active)
                 lines.append(f"- {session.session_id} (最后活动: {ts})")
             await self._messenger.send_markdown(chat_id, "\n".join(lines))
             return
@@ -473,3 +473,9 @@ def _truncate_text(text: str, max_chars: int) -> str:
     if len(text) <= limit:
         return text
     return text[:limit].rstrip() + "\n...(truncated)"
+
+
+def _format_local_time(dt: datetime) -> str:
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone().isoformat(sep=" ", timespec="minutes")
