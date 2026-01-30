@@ -311,9 +311,9 @@ class JarvisApp:
     async def _cmd_verbosity(self, chat_id: str, args: list[str]) -> None:
         if not args:
             current = self._get_chat_verbosity(chat_id)
-            await self._send_message(
+            await self._send_markdown(
                 chat_id,
-                f"当前 verbosity: {current}\n用法: /verbosity full|compact|reset",
+                f"**当前 verbosity**: `{current}`\n**用法**: `/verbosity full|compact|reset`",
             )
             return
 
@@ -321,19 +321,22 @@ class JarvisApp:
         if action in {"reset", "default"}:
             await self._storage.delete_setting(chat_id, "verbosity")
             self._verbosity_by_chat[chat_id] = self._default_verbosity
-            await self._send_message(chat_id, f"verbosity 已重置为默认值: {self._default_verbosity}")
+            await self._send_markdown(
+                chat_id,
+                f"verbosity 已重置为默认值: `{self._default_verbosity}`",
+            )
             return
 
         normalized = self._normalize_verbosity(args[0])
         if not normalized:
-            await self._send_message(chat_id, "用法: /verbosity full|compact|reset")
+            await self._send_markdown(chat_id, "用法: `/verbosity full|compact|reset`")
             return
 
         self._verbosity_by_chat[chat_id] = normalized
         await self._storage.set_setting(chat_id, "verbosity", normalized)
-        await self._send_message(
+        await self._send_markdown(
             chat_id,
-            f"verbosity 已设置为: {normalized}",
+            f"verbosity 已设置为: `{normalized}`",
         )
 
     async def _handle_compact(self, chat_id: str) -> None:
@@ -448,51 +451,48 @@ class JarvisApp:
 
     async def _cmd_skills(self, chat_id: str, args: list[str]) -> None:
         if not args:
-            await self._send_message(
-                chat_id,
-                "用法: /skills sources | /skills list [source] | /skills installed "
-                "| /skills install <source> <name> | /skills add-source <name> <repo> <path> [ref] [token_env]",
-            )
+            await self._send_markdown(chat_id, _format_skills_usage())
             return
 
         action = args[0]
         if action == "installed":
             installed = list_installed_skills()
             if not installed:
-                await self._send_message(chat_id, "暂无已安装技能。")
+                await self._send_markdown(chat_id, "暂无已安装技能。")
                 return
-            lines = ["已安装技能:"]
+            lines = ["**已安装技能**"]
             for entry in installed:
                 desc = f" - {entry.description}" if entry.description else ""
-                lines.append(f"- {entry.name}{desc}")
-            await self._send_message(chat_id, "\n".join(lines))
+                lines.append(f"- `{entry.name}`{desc}")
+            await self._send_markdown(chat_id, "\n".join(lines))
             return
 
         if action == "sources":
             sources = self._config.skills.sources
             if not sources:
-                await self._send_message(chat_id, "未配置 skills sources。")
+                await self._send_markdown(chat_id, "未配置 skills sources。")
                 return
-            lines = ["已配置 sources:"]
+            lines = ["**已配置 sources**"]
             for src in sources:
                 ref = f"@{src.ref}" if src.ref else ""
-                lines.append(f"- {src.name}: {src.type} {src.repo}/{src.path}{ref}")
-            await self._send_message(chat_id, "\n".join(lines))
+                target = f"{src.repo}/{src.path}{ref}"
+                lines.append(f"- `{src.name}`: {src.type} `{target}`")
+            await self._send_markdown(chat_id, "\n".join(lines))
             return
 
         if action == "list":
             sources = self._config.skills.sources
             if not sources:
-                await self._send_message(chat_id, "未配置 skills sources。")
+                await self._send_markdown(chat_id, "未配置 skills sources。")
                 return
             source_name = args[1] if len(args) > 1 else None
             try:
                 remote = await list_remote_skills(sources, source_name=source_name)
             except SkillError as exc:
-                await self._send_message(chat_id, f"skills 列表获取失败: {exc}")
+                await self._send_markdown(chat_id, f"skills 列表获取失败: {exc}")
                 return
             if not remote:
-                await self._send_message(chat_id, "未找到可用技能。")
+                await self._send_markdown(chat_id, "未找到可用技能。")
                 return
             installed_names = {entry.name for entry in list_installed_skills()}
             grouped: dict[str, list[str]] = {}
@@ -502,35 +502,37 @@ class JarvisApp:
                 if name in installed_names:
                     name = f"{name} (已安装)"
                 grouped.setdefault(label, []).append(name)
-            lines = ["可用技能:"]
+            lines = ["**可用技能**"]
             for label, items in grouped.items():
-                lines.append(f"[{label}] {', '.join(items)}")
-            await self._send_message(chat_id, "\n".join(lines))
+                lines.append(f"**{label}**")
+                for idx, item in enumerate(items, start=1):
+                    lines.append(f"{idx}. `{item}`")
+            await self._send_markdown(chat_id, "\n".join(lines))
             return
 
         if action == "install":
             if len(args) < 3:
-                await self._send_message(chat_id, "用法: /skills install <source> <name>")
+                await self._send_markdown(chat_id, "用法: `/skills install <source> <name>`")
                 return
             source_name = args[1]
             skill_name = args[2]
             try:
                 dest = await install_skill(self._config.skills.sources, source_name, skill_name)
             except SkillError as exc:
-                await self._send_message(chat_id, f"安装失败: {exc}")
+                await self._send_markdown(chat_id, f"安装失败: {exc}")
                 return
-            await self._send_message(chat_id, f"已安装 {skill_name} -> {dest}")
+            await self._send_markdown(chat_id, f"已安装 `{skill_name}` -> `{dest}`")
             return
 
         if action == "add-source":
             if len(args) < 4:
-                await self._send_message(
+                await self._send_markdown(
                     chat_id,
-                    "用法: /skills add-source <name> <repo> <path> [ref] [token_env]",
+                    "用法: `/skills add-source <name> <repo> <path> [ref] [token_env]`",
                 )
                 return
             if not self._config.config_path:
-                await self._send_message(chat_id, "未找到配置路径，无法持久化 source。")
+                await self._send_markdown(chat_id, "未找到配置路径，无法持久化 source。")
                 return
             name = args[1].strip()
             repo = args[2].strip()
@@ -538,9 +540,9 @@ class JarvisApp:
             ref = args[4].strip() if len(args) > 4 else None
             token_env = args[5].strip() if len(args) > 5 else None
             if not name or not repo or not path:
-                await self._send_message(
+                await self._send_markdown(
                     chat_id,
-                    "用法: /skills add-source <name> <repo> <path> [ref] [token_env]",
+                    "用法: `/skills add-source <name> <repo> <path> [ref] [token_env]`",
                 )
                 return
             source = SkillSourceConfig(
@@ -554,7 +556,7 @@ class JarvisApp:
             try:
                 updated = persist_skill_source(self._config.config_path, source)
             except Exception as exc:
-                await self._send_message(chat_id, f"写入配置失败: {exc}")
+                await self._send_markdown(chat_id, f"写入配置失败: {exc}")
                 return
 
             replaced = False
@@ -567,10 +569,10 @@ class JarvisApp:
                 self._config.skills.sources.append(source)
 
             action_label = "已更新" if updated else "已添加"
-            await self._send_message(chat_id, f"{action_label} source: {name}")
+            await self._send_markdown(chat_id, f"{action_label} source: `{name}`")
             return
 
-        await self._send_message(chat_id, "未知 skills 子命令。")
+        await self._send_markdown(chat_id, "未知 skills 子命令。")
 
     async def _on_trigger(self, event: Event) -> None:
         payload = event.payload
@@ -633,7 +635,7 @@ class JarvisApp:
         if not summary:
             return
         final_text = f"💭 思考\n{self._as_blockquote(summary)}"
-        await self._send_markdown(chat_id, final_text)
+        await self._send_markdown(chat_id, final_text, with_separator=False)
 
     async def _handle_response_item(self, chat_id: str, payload: dict) -> None:
         item_type = payload.get("type")
@@ -644,7 +646,7 @@ class JarvisApp:
         tool_name = payload.get("name", "")
         arguments = payload.get("arguments", "")
         tool_display = self._format_tool_call(tool_name, arguments)
-        await self._send_markdown(chat_id, f"🔧 工具\n{tool_display}")
+        await self._send_markdown(chat_id, f"🔧 工具\n{tool_display}", with_separator=False)
 
     async def _handle_item_completed(self, chat_id: str, item: dict) -> None:
         item_type = item.get("type")
@@ -656,7 +658,11 @@ class JarvisApp:
                 return
             command = item.get("command", "")
             if command:
-                await self._send_markdown(chat_id, _format_code_block("⚙️ 执行命令", command))
+                await self._send_markdown(
+                    chat_id,
+                    _format_code_block("⚙️ 执行命令", command),
+                    with_separator=False,
+                )
             return
         if item_type == "tool_use":
             if not self._show_tool_messages(chat_id):
@@ -665,7 +671,7 @@ class JarvisApp:
             tool_input = item.get("input", {})
             if tool_name:
                 tool_display = self._format_tool_use(tool_name, tool_input)
-                await self._send_markdown(chat_id, f"🔧 工具\n{tool_display}")
+                await self._send_markdown(chat_id, f"🔧 工具\n{tool_display}", with_separator=False)
 
     async def _handle_item_reasoning(self, chat_id: str, item: dict) -> None:
         reasoning_text = ""
@@ -686,20 +692,21 @@ class JarvisApp:
             summary = self._summarize_reasoning(reasoning_text)
             if summary:
                 final_text = f"💭 思考\n{self._as_blockquote(summary)}"
-                await self._send_markdown(chat_id, final_text)
+                await self._send_markdown(chat_id, final_text, with_separator=False)
             return
 
-        await self._send_markdown(chat_id, "💭 _思考中_...")
+        await self._send_markdown(chat_id, "💭 _思考中_...", with_separator=False)
 
     async def _send_message(
         self,
         chat_id: str,
         text: str,
         *,
+        with_separator: bool = True,
         markdown: bool = False,
         parse_mode: str | None = None,
     ) -> None:
-        final_text = await self._with_session_prefix(chat_id, text)
+        final_text = await self._with_session_prefix(chat_id, text, with_separator=with_separator)
         payload = {"chat_id": chat_id, "text": final_text}
         if markdown:
             payload["markdown"] = True
@@ -707,10 +714,10 @@ class JarvisApp:
             payload["parse_mode"] = parse_mode
         await self._event_bus.publish(EVENT_TELEGRAM_SEND, payload)
 
-    async def _send_markdown(self, chat_id: str, text: str) -> None:
-        await self._send_message(chat_id, text, markdown=True)
+    async def _send_markdown(self, chat_id: str, text: str, *, with_separator: bool = True) -> None:
+        await self._send_message(chat_id, text, markdown=True, with_separator=with_separator)
 
-    async def _with_session_prefix(self, chat_id: str, text: str) -> str:
+    async def _with_session_prefix(self, chat_id: str, text: str, *, with_separator: bool = True) -> str:
         session = await self._storage.get_session(chat_id)
         if not session:
             return text
@@ -719,6 +726,8 @@ class JarvisApp:
         stripped = text.lstrip()
         if stripped.startswith(prefix) or stripped.startswith(bare_prefix):
             return text
+        if with_separator:
+            return f"{prefix}\n\n——\n\n{text}"
         return f"{prefix}\n\n{text}"
 
 
@@ -767,6 +776,19 @@ def _format_reminders(reminders: list[ReminderRecord]) -> str:
         ts = reminder.trigger_time.isoformat(sep=" ", timespec="minutes")
         lines.append(f"⏰ [{reminder.id}] {ts} {reminder.message}")
     return "\n".join(lines)
+
+
+def _format_skills_usage() -> str:
+    return "\n".join(
+        [
+            "**用法**",
+            "- `/skills sources`",
+            "- `/skills list [source]`",
+            "- `/skills installed`",
+            "- `/skills install <source> <name>`",
+            "- `/skills add-source <name> <repo> <path> [ref] [token_env]`",
+        ]
+    )
 
 
 def _format_code_block(label: str, content: str) -> str:
