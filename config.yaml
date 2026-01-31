@@ -44,6 +44,14 @@ triggers:
       cron: "0 */4 * * *"
       chat_id: "78746877"
       message: "Moltbook 心跳提醒：请检查动态/私信与 claim 状态。如果发现有意思的公开内容，也可以介绍一下"
+    - name: "nightly_build"
+      cron: "0 3 * * *"
+      chat_id: "78746877"
+      message: "Nightly Build：请先阅读 docs/instructions/nightly-build.md，然后执行一次低风险 Nightly Build，并输出 Nightly Report。"
+    - name: "nightly_build_followup"
+      cron: "30 8 * * *"
+      chat_id: "78746877"
+      message: "Nightly Build 复盘：请阅读 docs/instructions/nightly-build.md，检查是否有可跟进项，输出 Morning Report（如需人工确认请明确标注）。"
 
   monitors:
     - name: "cpu_alert"
