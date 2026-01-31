@@ -5,6 +5,7 @@ memory/
 MEMORY.md
 AGENTS.md
 *.egg-info/
+.env
 
 # Local artifacts
 chat.png
