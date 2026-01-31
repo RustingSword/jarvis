@@ -10,6 +10,7 @@ from jarvis.event_bus import Event
 from jarvis.formatting import format_code_block
 from jarvis.memory import MemoryManager
 from jarvis.messaging.messenger import Messenger
+from jarvis.pipeline.prompt_builder import PromptBuilder
 from jarvis.skills import SkillError, install_skill, list_installed_skills, list_remote_skills
 from jarvis.storage import Storage
 from jarvis.verbosity import VerbosityManager
@@ -35,6 +36,7 @@ class CommandRouter:
         self._skills = skills
         self._config_path = config_path
         self._verbosity = verbosity
+        self._prompt_builder = PromptBuilder(memory)
 
         self._handlers = {
             "start": self._cmd_start,
@@ -72,7 +74,7 @@ class CommandRouter:
                     "**可用命令**",
                     "- `/start` - 开始对话",
                     "- `/help` - 显示帮助",
-                    "- `/new` - 新建会话（不影响历史会话列表）",
+                    "- `/new [任务]` - 新建会话（可直接跟任务并执行）",
                     "- `/reset` - 重置当前对话上下文",
                     "- `/compact` - 压缩对话历史并重置",
                     "- `/resume <id>` - 恢复历史会话（不带 id 会列出最近会话）",
@@ -89,7 +91,36 @@ class CommandRouter:
 
     async def _cmd_new(self, chat_id: str, args: list[str]) -> None:
         await self._storage.clear_session(chat_id)
-        await self._messenger.send_markdown(chat_id, "已创建新会话，请发送新消息开始。")
+        if not args:
+            await self._messenger.send_markdown(chat_id, "已创建新会话，请发送新消息开始。")
+            return
+        task_text = " ".join(args).strip()
+        if not task_text:
+            await self._messenger.send_markdown(chat_id, "已创建新会话，请发送新消息开始。")
+            return
+        try:
+            prompt = await self._prompt_builder.build(task_text, [])
+            result = await self._codex.run(prompt)
+        except CodexTimeoutError:
+            await self._messenger.send_markdown(chat_id, "新会话任务执行超时，请稍后再试。")
+            return
+        except CodexProcessError as exc:
+            await self._messenger.send_markdown(chat_id, f"新会话任务执行失败: {exc}")
+            return
+
+        session_record = None
+        if result.thread_id:
+            session_record = await self._storage.upsert_session(
+                chat_id, result.thread_id, set_active=True
+            )
+
+        response_text = result.response_text.strip() if result.response_text else "(无可用回复)"
+        await self._messenger.send_markdown(
+            chat_id,
+            response_text,
+            session_id=session_record.session_id if session_record else None,
+            thread_id=session_record.thread_id if session_record else None,
+        )
 
     async def _cmd_reset(self, chat_id: str, args: list[str]) -> None:
         await self._storage.clear_session(chat_id)
