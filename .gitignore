@@ -2,6 +2,7 @@
 __pycache__/
 *.log
 memory/
+MEMORY.md
 AGENTS.md
 *.egg-info/
 
