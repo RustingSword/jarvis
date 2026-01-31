@@ -63,7 +63,7 @@ triggers:
       type: "cpu"
       threshold: 80
       interval_seconds: 60
-      enabled: true
+      enabled: false
       chat_id: "78746877"
 
   webhook:

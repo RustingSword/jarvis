@@ -106,6 +106,12 @@ class CodexManager:
         thread_id = _extract_thread_id(events)
         response_text = _extract_response_text(events)
         media = _extract_media(events, response_text, _expand_user(self._config.workspace_dir))
+        if media:
+            logger.info("Extracted %d media item(s) from response.", len(media))
+            for item in media:
+                logger.info("Media item: type=%s path=%s", item.get("type"), item.get("path") or item.get("file"))
+        else:
+            logger.info("No media items extracted from response.")
         response_text = _strip_media_markers(response_text)
 
         if proc.returncode != 0:
@@ -306,7 +312,11 @@ def _resolve_media_path(raw: str, workspace_dir: str) -> str | None:
         candidate = (Path(workspace_dir) / candidate).resolve()
     else:
         candidate = candidate.resolve()
-    if not candidate.exists() or candidate.is_dir():
+    if not candidate.exists():
+        logger.warning("Media path does not exist: %s (raw=%s)", candidate, raw)
+        return None
+    if candidate.is_dir():
+        logger.warning("Media path is a directory, skipping: %s (raw=%s)", candidate, raw)
         return None
     return str(candidate)
 

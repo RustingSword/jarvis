@@ -110,45 +110,53 @@ class TelegramBot:
         chat_id = event.payload.get("chat_id")
         if not chat_id:
             return
+        media_items = event.payload.get("media") or event.payload.get("attachments") or []
         text = event.payload.get("text")
-        if not text:
+        if not text and not media_items:
             return
         meta = event.payload.get("meta") or {}
         parse_mode = event.payload.get("parse_mode")
         use_markdown = event.payload.get("markdown", False)
-        raw_text = text
-        send_text = text
-        send_parse_mode = None
-        if parse_mode:
-            send_parse_mode = parse_mode
-        elif use_markdown:
-            # 使用 telegramify-markdown 转换为 MarkdownV2 格式
-            send_parse_mode = ParseMode.MARKDOWN_V2
-            send_text = telegramify_markdown.markdownify(text)
-            # 调试日志
-            logger.debug(f"Markdown conversion:\nOriginal: {text[:200]}\nConverted: {send_text[:200]}\nParse mode: {send_parse_mode}")
-        else:
-            # 不使用格式化，直接发送纯文本
+        if text:
+            raw_text = text
+            send_text = text
             send_parse_mode = None
-        try:
-            await self._send_text_chunks(chat_id, send_text, send_parse_mode, meta)
-        except BadRequest as exc:
-            if _is_chat_not_found_error(exc):
-                logger.warning("Telegram chat not found (chat_id=%s); drop message.", chat_id)
-                return
-            if send_parse_mode:
-                logger.warning("Failed to send Markdown message, retrying as plain text: %s", exc)
-                try:
-                    await self._send_text_chunks(chat_id, raw_text, None, meta)
-                except BadRequest as retry_exc:
-                    if _is_chat_not_found_error(retry_exc):
-                        logger.warning("Telegram chat not found (chat_id=%s); drop message.", chat_id)
-                        return
-                    raise
+            if parse_mode:
+                send_parse_mode = parse_mode
+            elif use_markdown:
+                # 使用 telegramify-markdown 转换为 MarkdownV2 格式
+                send_parse_mode = ParseMode.MARKDOWN_V2
+                send_text = telegramify_markdown.markdownify(text)
+                # 调试日志
+                logger.debug(
+                    "Markdown conversion:\nOriginal: %s\nConverted: %s\nParse mode: %s",
+                    text[:200],
+                    send_text[:200],
+                    send_parse_mode,
+                )
             else:
-                raise
-        media_items = event.payload.get("media") or event.payload.get("attachments") or []
+                # 不使用格式化，直接发送纯文本
+                send_parse_mode = None
+            try:
+                await self._send_text_chunks(chat_id, send_text, send_parse_mode, meta)
+            except BadRequest as exc:
+                if _is_chat_not_found_error(exc):
+                    logger.warning("Telegram chat not found (chat_id=%s); drop message.", chat_id)
+                    return
+                if send_parse_mode:
+                    logger.warning("Failed to send Markdown message, retrying as plain text: %s", exc)
+                    try:
+                        await self._send_text_chunks(chat_id, raw_text, None, meta)
+                    except BadRequest as retry_exc:
+                        if _is_chat_not_found_error(retry_exc):
+                            logger.warning("Telegram chat not found (chat_id=%s); drop message.", chat_id)
+                            return
+                        raise
+                else:
+                    raise
         if media_items:
+            if not text:
+                logger.info("Sending media-only payload to chat_id=%s", chat_id)
             await self._send_media_items(chat_id, media_items, event.payload)
 
     async def _send_text_chunks(
@@ -317,14 +325,17 @@ class TelegramBot:
     async def _send_media_items(self, chat_id: str, media_items: list[dict[str, Any]], payload: dict) -> None:
         if not self._is_app_ready():
             return
+        logger.info("Preparing to send %d media item(s) to chat_id=%s", len(media_items), chat_id)
         for item in media_items:
             path = item.get("path") or item.get("file")
             if not path:
+                logger.warning("Media item missing path: %s", item)
                 continue
             kind = (item.get("type") or "document").lower()
             caption = item.get("caption")
             parse_mode = item.get("parse_mode")
             try:
+                logger.info("Sending media: type=%s path=%s", kind, path)
                 await self._send_single_media(chat_id, kind, path, caption=caption, parse_mode=parse_mode)
             except Exception:
                 logger.exception("Failed to send media: %s", path)
@@ -346,29 +357,61 @@ class TelegramBot:
             return
         try:
             if kind == "photo":
-                await self._app.bot.send_photo(chat_id=chat_id, photo=file_path, caption=caption, parse_mode=parse_mode)
+                sent = await self._app.bot.send_photo(
+                    chat_id=chat_id,
+                    photo=file_path,
+                    caption=caption,
+                    parse_mode=parse_mode,
+                )
+                logger.info("Media sent (photo): path=%s message_id=%s", file_path, sent.message_id)
                 return
             if kind == "video":
-                await self._app.bot.send_video(chat_id=chat_id, video=file_path, caption=caption, parse_mode=parse_mode)
+                sent = await self._app.bot.send_video(
+                    chat_id=chat_id,
+                    video=file_path,
+                    caption=caption,
+                    parse_mode=parse_mode,
+                )
+                logger.info("Media sent (video): path=%s message_id=%s", file_path, sent.message_id)
                 return
             if kind == "audio":
-                await self._app.bot.send_audio(chat_id=chat_id, audio=file_path, caption=caption, parse_mode=parse_mode)
+                sent = await self._app.bot.send_audio(
+                    chat_id=chat_id,
+                    audio=file_path,
+                    caption=caption,
+                    parse_mode=parse_mode,
+                )
+                logger.info("Media sent (audio): path=%s message_id=%s", file_path, sent.message_id)
                 return
             if kind == "voice":
-                await self._app.bot.send_voice(chat_id=chat_id, voice=file_path, caption=caption, parse_mode=parse_mode)
+                sent = await self._app.bot.send_voice(
+                    chat_id=chat_id,
+                    voice=file_path,
+                    caption=caption,
+                    parse_mode=parse_mode,
+                )
+                logger.info("Media sent (voice): path=%s message_id=%s", file_path, sent.message_id)
                 return
             if kind == "animation":
-                await self._app.bot.send_animation(
+                sent = await self._app.bot.send_animation(
                     chat_id=chat_id,
                     animation=file_path,
                     caption=caption,
                     parse_mode=parse_mode,
                 )
+                logger.info("Media sent (animation): path=%s message_id=%s", file_path, sent.message_id)
                 return
             if kind == "video_note":
-                await self._app.bot.send_video_note(chat_id=chat_id, video_note=file_path)
+                sent = await self._app.bot.send_video_note(chat_id=chat_id, video_note=file_path)
+                logger.info("Media sent (video_note): path=%s message_id=%s", file_path, sent.message_id)
                 return
-            await self._app.bot.send_document(chat_id=chat_id, document=file_path, caption=caption, parse_mode=parse_mode)
+            sent = await self._app.bot.send_document(
+                chat_id=chat_id,
+                document=file_path,
+                caption=caption,
+                parse_mode=parse_mode,
+            )
+            logger.info("Media sent (document): path=%s message_id=%s", file_path, sent.message_id)
         except BadRequest as exc:
             if _is_chat_not_found_error(exc):
                 logger.warning("Telegram chat not found (chat_id=%s); skip media: %s", chat_id, file_path)
