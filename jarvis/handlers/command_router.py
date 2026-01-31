@@ -226,7 +226,10 @@ class CommandRouter:
             return
 
         try:
-            await self._memory.append_daily_block(summary, title="compact")
+            title = "compact"
+            if session.session_id is not None:
+                title = f"compact session_id={session.session_id}"
+            await self._memory.append_daily_block(summary, title=title)
             await self._memory.sync()
         except Exception:
             logger.exception("Failed to write compact summary to memory")
