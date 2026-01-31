@@ -39,6 +39,7 @@ class CommandRouter:
         self._handlers = {
             "start": self._cmd_start,
             "help": self._cmd_help,
+            "new": self._cmd_new,
             "reset": self._cmd_reset,
             "compact": self._cmd_compact,
             "resume": self._cmd_resume,
@@ -71,6 +72,7 @@ class CommandRouter:
                     "**可用命令**",
                     "- `/start` - 开始对话",
                     "- `/help` - 显示帮助",
+                    "- `/new` - 新建会话（不影响历史会话列表）",
                     "- `/reset` - 重置当前对话上下文",
                     "- `/compact` - 压缩对话历史并重置",
                     "- `/resume <id>` - 恢复历史会话（不带 id 会列出最近会话）",
@@ -84,6 +86,10 @@ class CommandRouter:
                 ]
             ),
         )
+
+    async def _cmd_new(self, chat_id: str, args: list[str]) -> None:
+        await self._storage.clear_session(chat_id)
+        await self._messenger.send_markdown(chat_id, "已创建新会话，请发送新消息开始。")
 
     async def _cmd_reset(self, chat_id: str, args: list[str]) -> None:
         await self._storage.clear_session(chat_id)
