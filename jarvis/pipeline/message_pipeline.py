@@ -34,12 +34,13 @@ class MessagePipeline:
         chat_id = event.payload.get("chat_id")
         text = event.payload.get("text", "")
         attachments = list(event.payload.get("attachments") or [])
+        is_trigger = event.payload.get("source") == "trigger"
         if not chat_id or (not text and not attachments):
             return
 
         await self._verbosity.ensure(chat_id)
         session = await self._storage.get_session(chat_id)
-        thread_id = session.thread_id if session else None
+        thread_id = None if is_trigger else (session.thread_id if session else None)
 
         async def progress_callback(codex_event: dict) -> None:
             await self._progress.handle(chat_id, codex_event)
@@ -60,7 +61,7 @@ class MessagePipeline:
             await self._messenger.send_message(chat_id, f"Codex 调用失败: {exc}")
             return
 
-        if result.thread_id:
+        if result.thread_id and not is_trigger:
             await self._storage.upsert_session(chat_id, result.thread_id)
 
         if result.media:

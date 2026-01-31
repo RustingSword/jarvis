@@ -65,7 +65,7 @@ class TriggerDispatcher:
             return
         event = Event(
             type="trigger.message",
-            payload={"chat_id": str(chat_id), "text": message},
+            payload={"chat_id": str(chat_id), "text": message, "source": "trigger"},
             created_at=datetime.now(timezone.utc),
         )
         await self._enqueue_message(event)
