@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta, timezone
 
 from jarvis.codex import CodexError, CodexProcessError, CodexTimeoutError, CodexManager
@@ -17,6 +18,8 @@ from jarvis.verbosity import VerbosityManager
 
 logger = logging.getLogger(__name__)
 
+EventEnqueuer = Callable[[Event], Awaitable[None]]
+
 
 class CommandRouter:
     def __init__(
@@ -28,6 +31,7 @@ class CommandRouter:
         skills: SkillsConfig,
         config_path: str | None,
         verbosity: VerbosityManager,
+        enqueue_task: EventEnqueuer | None = None,
     ) -> None:
         self._messenger = messenger
         self._storage = storage
@@ -36,6 +40,7 @@ class CommandRouter:
         self._skills = skills
         self._config_path = config_path
         self._verbosity = verbosity
+        self._enqueue_task = enqueue_task
         self._prompt_builder = PromptBuilder(memory)
 
         self._handlers = {
@@ -98,6 +103,19 @@ class CommandRouter:
         if not task_text:
             await self._messenger.send_markdown(chat_id, "已创建新会话，请发送新消息开始。")
             return
+        if self._enqueue_task:
+            event = Event(
+                type="command.task",
+                payload={"chat_id": str(chat_id), "task": task_text},
+                created_at=datetime.now(timezone.utc),
+            )
+            await self._enqueue_task(event)
+            await self._messenger.send_markdown(
+                chat_id,
+                "任务已进入队列，开始执行后会提示会话 ID。",
+                with_session_prefix=False,
+            )
+            return
         try:
             prompt = await self._prompt_builder.build(task_text, [])
             result = await self._codex.run(prompt)
@@ -135,10 +153,13 @@ class CommandRouter:
             if not sessions:
                 await self._messenger.send_markdown(chat_id, "暂无可恢复的会话。")
                 return
+            active_session = await self._storage.get_session(chat_id)
+            active_id = active_session.session_id if active_session else None
             lines = ["**用法**: `/resume <id>`", "**最近会话**:"]
             for session in sessions:
                 ts = _format_local_time(session.last_active)
-                lines.append(f"- {session.session_id} (最后活动: {ts})")
+                marker = "*" if active_id == session.session_id else ""
+                lines.append(f"- {session.session_id}{marker} (最后活动: {ts})")
             await self._messenger.send_markdown(chat_id, "\n".join(lines))
             return
 

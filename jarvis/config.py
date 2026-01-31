@@ -93,6 +93,7 @@ class OutputConfig:
 class WorkerConfig:
     message_concurrency: int = 1
     command_concurrency: int = 1
+    task_concurrency: int = 1
 
 
 @dataclass(slots=True)
@@ -183,6 +184,7 @@ def load_config(path: str | Path) -> AppConfig:
         workers=WorkerConfig(
             message_concurrency=int(workers_raw.get("message_concurrency", 1)),
             command_concurrency=int(workers_raw.get("command_concurrency", 1)),
+            task_concurrency=int(workers_raw.get("task_concurrency", 1)),
         ),
         triggers=_parse_triggers(triggers_raw),
         skills=_parse_skills(skills_raw),

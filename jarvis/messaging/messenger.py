@@ -96,12 +96,15 @@ class Messenger:
         with_separator: bool = True,
         session_id: int | None = None,
     ) -> str:
+        active_session = await self._storage.get_session(chat_id)
+        active_id = active_session.session_id if active_session else None
         if session_id is None:
-            session = await self._storage.get_session(chat_id)
-            if not session:
+            if not active_session:
                 return text
-            session_id = session.session_id
-        bare_prefix = f"[{int(session_id)}]"
+            session_id = active_session.session_id
+        is_active = active_id is not None and int(session_id) == int(active_id)
+        suffix = "*" if is_active else ""
+        bare_prefix = f"[{int(session_id)}{suffix}]"
         prefix = f"> Session {bare_prefix}"
         stripped = text.lstrip()
         if stripped.startswith(prefix) or stripped.startswith(bare_prefix):

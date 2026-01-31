@@ -21,6 +21,7 @@ from jarvis.messaging.bundler import MessageBundler
 from jarvis.messaging.messenger import Messenger
 from jarvis.pipeline.message_pipeline import MessagePipeline
 from jarvis.pipeline.prompt_builder import PromptBuilder
+from jarvis.pipeline.task_pipeline import TaskPipeline
 from jarvis.storage import Storage
 from jarvis.telegram import TelegramBot
 from jarvis.triggers import TriggerManager
@@ -58,6 +59,17 @@ class JarvisApp:
             name="message-worker",
             concurrency=config.workers.message_concurrency,
         )
+        self._task_pipeline = TaskPipeline(
+            self._codex,
+            self._storage,
+            self._prompt_builder,
+            self._messenger,
+        )
+        self._task_worker = QueueWorker(
+            self._task_pipeline.handle,
+            name="task-worker",
+            concurrency=config.workers.task_concurrency,
+        )
         self._command_router = CommandRouter(
             self._messenger,
             self._storage,
@@ -66,6 +78,7 @@ class JarvisApp:
             config.skills,
             config.config_path,
             self._verbosity,
+            self._task_worker.enqueue,
         )
         self._trigger_dispatcher = TriggerDispatcher(self._message_worker.enqueue)
         self._command_worker = QueueWorker(
@@ -90,6 +103,7 @@ class JarvisApp:
         await self._telegram.start()
         await self._send_startup_message()
         await self._message_worker.start()
+        await self._task_worker.start()
         await self._command_worker.start()
         await self._idle()
 
@@ -98,6 +112,7 @@ class JarvisApp:
         await self._triggers.stop()
         await self._bundler.flush_all()
         await self._message_worker.stop()
+        await self._task_worker.stop()
         await self._command_worker.stop()
         await self._memory.close()
         await self._storage.close()

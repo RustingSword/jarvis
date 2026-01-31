@@ -37,6 +37,7 @@ output:
 workers:
   message_concurrency: 2
   command_concurrency: 1
+  task_concurrency: 2
 
 triggers:
   scheduler:
