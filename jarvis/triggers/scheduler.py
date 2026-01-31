@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import timezone
+from datetime import datetime, timezone
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -16,7 +16,9 @@ logger = logging.getLogger(__name__)
 class SchedulerTrigger:
     def __init__(self, event_bus: EventBus) -> None:
         self._event_bus = event_bus
-        self._scheduler = AsyncIOScheduler(timezone=timezone.utc)
+        local_tz = datetime.now().astimezone().tzinfo or timezone.utc
+        self._scheduler = AsyncIOScheduler(timezone=local_tz)
+        self._timezone = local_tz
 
     async def start(self) -> None:
         self._scheduler.start()
@@ -31,7 +33,7 @@ class SchedulerTrigger:
             if not job.name or not job.cron:
                 continue
             try:
-                trigger = CronTrigger.from_crontab(job.cron, timezone=timezone.utc)
+                trigger = CronTrigger.from_crontab(job.cron, timezone=self._timezone)
             except Exception:
                 logger.exception("Invalid cron expression for job '%s': %s", job.name, job.cron)
                 continue

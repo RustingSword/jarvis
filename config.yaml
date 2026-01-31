@@ -1,6 +1,9 @@
 telegram:
   token: "8317838346:AAEM-xA0v8OJlw3qJ8KkeJmVY6jTk5IAlXU"
   bundle_wait_seconds: 10
+  startup_notify: true
+  startup_chat_id: "78746877"
+  startup_message: "Jarvis 已就绪 ✅"
 
 codex:
   workspace_dir: "/home/nazgul/jarvis"
@@ -34,7 +37,8 @@ output:
 triggers:
   scheduler:
     - name: "daily_summary"
-      cron: "0 9 * * *"
+      cron: "0 10 * * *"
+      chat_id: "78746877"
       message: "每日提醒：查看hacker news首页的新闻，并汇总新闻内容和用户的评论，发送到telegram。"
     - name: "moltbook_heartbeat"
       cron: "0 */4 * * *"
@@ -47,6 +51,7 @@ triggers:
       threshold: 80
       interval_seconds: 60
       enabled: true
+      chat_id: "78746877"
 
   webhook:
     host: "0.0.0.0"

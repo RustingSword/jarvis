@@ -46,6 +46,7 @@ class JarvisApp:
             self._messenger,
             self._verbosity,
         )
+        self._message_worker = QueueWorker(self._message_pipeline.handle, name="message-worker")
         self._command_router = CommandRouter(
             self._messenger,
             self._storage,
@@ -55,9 +56,7 @@ class JarvisApp:
             config.config_path,
             self._verbosity,
         )
-        self._trigger_dispatcher = TriggerDispatcher(self._messenger)
-
-        self._message_worker = QueueWorker(self._message_pipeline.handle, name="message-worker")
+        self._trigger_dispatcher = TriggerDispatcher(self._message_worker.enqueue)
         self._command_worker = QueueWorker(self._command_router.handle, name="command-worker")
         self._bundler = MessageBundler(
             config.telegram.bundle_wait_seconds,
@@ -73,6 +72,7 @@ class JarvisApp:
         await self._memory.connect()
         await self._triggers.start()
         await self._telegram.start()
+        await self._send_startup_message()
         await self._message_worker.start()
         await self._command_worker.start()
         await self._idle()
@@ -90,3 +90,17 @@ class JarvisApp:
         logger.info("Jarvis app running")
         stop_event = asyncio.Event()
         await stop_event.wait()
+
+    async def _send_startup_message(self) -> None:
+        cfg = self._config.telegram
+        if not cfg.startup_notify:
+            return
+        if not cfg.startup_chat_id:
+            logger.warning("Startup notify enabled but startup_chat_id not set")
+            return
+        message = cfg.startup_message or "Jarvis 已就绪 ✅"
+        await self._messenger.send_message(
+            str(cfg.startup_chat_id),
+            message,
+            with_session_prefix=False,
+        )
