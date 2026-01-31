@@ -35,7 +35,11 @@ triggers:
   scheduler:
     - name: "daily_summary"
       cron: "0 9 * * *"
-      message: "每日提醒：记得查看任务清单。"
+      message: "每日提醒：查看hacker news首页的新闻，并汇总新闻内容和用户的评论，发送到telegram。"
+    - name: "moltbook_heartbeat"
+      cron: "0 */4 * * *"
+      chat_id: "78746877"
+      message: "Moltbook 心跳提醒：请检查动态/私信与 claim 状态。如果发现有意思的公开内容，也可以发送到telegram。"
 
   monitors:
     - name: "cpu_alert"
