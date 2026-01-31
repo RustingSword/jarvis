@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import json
 import logging
+import json
 
 from jarvis.formatting import as_blockquote, format_code_block, format_tool_path
 from jarvis.messaging.messenger import Messenger
@@ -9,17 +9,6 @@ from jarvis.storage import Storage
 from jarvis.verbosity import VerbosityManager
 
 logger = logging.getLogger(__name__)
-
-_TOOL_CALL_NAME_MAP = {
-    "shell_command": "执行命令",
-    "read_file": "读取文件",
-    "write_file": "写入文件",
-    "edit_file": "编辑文件",
-    "list_directory": "列出目录",
-    "web_search": "网络搜索",
-    "browser_action": "浏览器操作",
-    "apply_patch": "应用补丁",
-}
 
 _TOOL_USE_NAME_MAP = {
     "bash": "执行命令",
@@ -44,7 +33,6 @@ class CodexProgressHandler:
 
     async def handle(self, chat_id: str, event: dict) -> None:
         event_type = event.get("type")
-
         if event_type == "thread.started":
             thread_id = event.get("thread_id")
             if thread_id:
@@ -53,10 +41,6 @@ class CodexProgressHandler:
 
         if event_type == "event_msg":
             await self._handle_event_msg(chat_id, event.get("payload", {}))
-            return
-
-        if event_type == "response_item":
-            await self._handle_response_item(chat_id, event.get("payload", {}))
             return
 
         if event_type == "item.completed":
@@ -79,44 +63,32 @@ class CodexProgressHandler:
         final_text = f"💭 思考\n{as_blockquote(summary)}"
         await self._messenger.send_markdown(chat_id, final_text, with_separator=False)
 
-    async def _handle_response_item(self, chat_id: str, payload: dict) -> None:
-        if not self._verbosity.show_tool_messages(chat_id):
-            return
-        payload_type = payload.get("type")
-        if payload_type == "function_call":
-            tool_name = payload.get("name", "")
-            arguments = payload.get("arguments", "")
-            tool_display = self._format_tool_call(tool_name, arguments)
-            await self._messenger.send_markdown(
-                chat_id,
-                f"🔧 工具\n{tool_display}",
-                with_separator=False,
-            )
-            return
-        if payload_type == "web_search_call":
-            tool_display = self._format_web_search_call(payload.get("action") or {})
-            await self._messenger.send_markdown(
-                chat_id,
-                f"🔧 工具\n{tool_display}",
-                with_separator=False,
-            )
-            return
-        if payload_type == "custom_tool_call":
-            tool_display = self._format_custom_tool_call(
-                payload.get("name", ""),
-                payload.get("input"),
-            )
-            await self._messenger.send_markdown(
-                chat_id,
-                f"🔧 工具\n{tool_display}",
-                with_separator=False,
-            )
-            return
-
     async def _handle_item_completed(self, chat_id: str, item: dict) -> None:
         item_type = item.get("type")
         if item_type == "reasoning":
             await self._handle_item_reasoning(chat_id, item)
+            return
+        if item_type == "agent_message":
+            return
+        if item_type == "web_search":
+            if not self._verbosity.show_tool_messages(chat_id):
+                return
+            tool_display = self._format_web_search_item(item)
+            await self._messenger.send_markdown(
+                chat_id,
+                f"🔧 工具\n{tool_display}",
+                with_separator=False,
+            )
+            return
+        if item_type == "file_change":
+            if not self._verbosity.show_tool_messages(chat_id):
+                return
+            tool_display = self._format_file_change_item(item)
+            await self._messenger.send_markdown(
+                chat_id,
+                f"🔧 工具\n{tool_display}",
+                with_separator=False,
+            )
             return
         if item_type == "command_execution":
             if not self._verbosity.show_tool_messages(chat_id):
@@ -141,6 +113,7 @@ class CodexProgressHandler:
                     f"🔧 工具\n{tool_display}",
                     with_separator=False,
                 )
+                return
 
     async def _handle_item_reasoning(self, chat_id: str, item: dict) -> None:
         reasoning_text = ""
@@ -165,22 +138,6 @@ class CodexProgressHandler:
             return
 
         await self._messenger.send_markdown(chat_id, "💭 _思考中_...", with_separator=False)
-
-    def _format_tool_call(self, tool_name: str, arguments: str) -> str:
-        tool_display = _TOOL_CALL_NAME_MAP.get(tool_name, tool_name)
-        try:
-            args = json.loads(arguments)
-            if tool_name == "shell_command" and "command" in args:
-                cmd = args["command"]
-                cmd_str = " ".join(cmd) if isinstance(cmd, list) else str(cmd)
-                return format_code_block(tool_display, cmd_str)
-            if "path" in args:
-                return format_tool_path(tool_display, str(args["path"]))
-            if "file" in args:
-                return format_tool_path(tool_display, str(args["file"]))
-        except (json.JSONDecodeError, KeyError, TypeError):
-            pass
-        return tool_display
 
     def _format_tool_use(self, tool_name: str, tool_input: dict) -> str:
         tool_display = _TOOL_USE_NAME_MAP.get(tool_name, tool_name)
@@ -207,31 +164,47 @@ class CodexProgressHandler:
             return f"{header}\n在 {url} 中查找 {pattern}".strip()
         return f"{header}\n{json.dumps(action, ensure_ascii=False)}"
 
-    def _format_custom_tool_call(self, tool_name: str, tool_input: object) -> str:
-        tool_display = _TOOL_CALL_NAME_MAP.get(tool_name, tool_name or "自定义工具")
-        if isinstance(tool_input, dict):
-            if "command" in tool_input:
-                cmd = tool_input.get("command")
-                cmd_str = " ".join(cmd) if isinstance(cmd, list) else str(cmd)
-                return format_code_block(tool_display, cmd_str)
-            if "path" in tool_input:
-                return format_tool_path(tool_display, str(tool_input.get("path")))
-            if "file" in tool_input:
-                return format_tool_path(tool_display, str(tool_input.get("file")))
-            if "url" in tool_input:
-                return format_tool_path(tool_display, str(tool_input.get("url")))
-            if "query" in tool_input:
-                return format_tool_path(tool_display, str(tool_input.get("query")))
-            return f"{tool_display}\n{json.dumps(tool_input, ensure_ascii=False)}"
-        if isinstance(tool_input, str) and tool_input:
-            if tool_name == "apply_patch":
-                updated_files = []
-                for line in tool_input.splitlines():
-                    if line.startswith("*** Update File: "):
-                        updated_files.append(line.replace("*** Update File: ", "", 1).strip())
-                if updated_files:
-                    if len(updated_files) == 1:
-                        return f"{tool_display}\n更新文件: {updated_files[0]}"
-                    return f"{tool_display}\n更新文件:\n" + "\n".join(updated_files)
-            return format_code_block(tool_display, tool_input)
-        return tool_display
+    def _format_web_search_item(self, item: dict) -> str:
+        action = item.get("action")
+        if isinstance(action, dict):
+            return self._format_web_search_call(action)
+        for key in ("query", "q"):
+            value = item.get(key)
+            if isinstance(value, str) and value:
+                return f"网络搜索\n搜索: {value}".strip()
+        payload = item.get("input") or item.get("params")
+        if isinstance(payload, dict):
+            query = payload.get("query") or payload.get("q")
+            if isinstance(query, str) and query:
+                return f"网络搜索\n搜索: {query}".strip()
+            url = payload.get("url")
+            pattern = payload.get("pattern")
+            if isinstance(url, str) and isinstance(pattern, str):
+                return f"网络搜索\n在 {url} 中查找 {pattern}".strip()
+            if isinstance(url, str):
+                return f"网络搜索\n打开页面: {url}".strip()
+        return "网络搜索"
+
+    def _format_file_change_item(self, item: dict) -> str:
+        label = "文件变更"
+        for key in ("path", "file"):
+            value = item.get(key)
+            if isinstance(value, str) and value:
+                return format_tool_path(label, value)
+        for key in ("paths", "files"):
+            value = item.get(key)
+            if isinstance(value, list):
+                paths = [str(p) for p in value if isinstance(p, str) and p]
+                if paths:
+                    return f"{label}\n" + "\n".join(paths)
+        changes = item.get("changes")
+        if isinstance(changes, list):
+            paths = []
+            for change in changes:
+                if isinstance(change, dict):
+                    path = change.get("path") or change.get("file")
+                    if isinstance(path, str) and path:
+                        paths.append(path)
+            if paths:
+                return f"{label}\n" + "\n".join(paths)
+        return label
