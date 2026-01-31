@@ -56,8 +56,30 @@ class MessagePipeline:
 
         activate_on_complete = (not is_trigger) and (message_session is None) and (active_session is None)
 
+        progress_state = {"session_id": None, "thread_id": None}
+        if message_session:
+            progress_state["session_id"] = message_session.session_id
+            progress_state["thread_id"] = message_session.thread_id
+        elif active_session:
+            progress_state["session_id"] = active_session.session_id
+            progress_state["thread_id"] = active_session.thread_id
+
         async def progress_callback(codex_event: dict) -> None:
-            await self._progress.handle(chat_id, codex_event)
+            if codex_event.get("type") == "thread.started":
+                thread_id = codex_event.get("thread_id")
+                if thread_id:
+                    record = await self._storage.upsert_session(
+                        chat_id,
+                        str(thread_id),
+                        set_active=False,
+                    )
+                    progress_state["session_id"] = record.session_id
+                    progress_state["thread_id"] = record.thread_id
+            await self._progress.handle(
+                chat_id,
+                codex_event,
+                session_id=progress_state.get("session_id"),
+            )
 
         try:
             prompt = await self._prompt_builder.build(text, attachments)

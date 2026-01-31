@@ -31,26 +31,22 @@ class CodexProgressHandler:
         self._storage = storage
         self._verbosity = verbosity
 
-    async def handle(self, chat_id: str, event: dict) -> None:
+    async def handle(self, chat_id: str, event: dict, *, session_id: int | None = None) -> None:
         event_type = event.get("type")
-        if event_type == "thread.started":
-            thread_id = event.get("thread_id")
-            if thread_id:
-                await self._storage.upsert_session(chat_id, str(thread_id), set_active=False)
-            return
-
         if event_type == "event_msg":
-            await self._handle_event_msg(chat_id, event.get("payload", {}))
+            await self._handle_event_msg(chat_id, event.get("payload", {}), session_id=session_id)
             return
 
         if event_type == "item.completed":
-            await self._handle_item_completed(chat_id, event.get("item", {}))
+            await self._handle_item_completed(chat_id, event.get("item", {}), session_id=session_id)
             return
 
     def _summarize_reasoning(self, text: str) -> str:
         return text
 
-    async def _handle_event_msg(self, chat_id: str, payload: dict) -> None:
+    async def _handle_event_msg(
+        self, chat_id: str, payload: dict, *, session_id: int | None
+    ) -> None:
         msg_type = payload.get("type")
         if msg_type != "agent_reasoning":
             return
@@ -61,14 +57,14 @@ class CodexProgressHandler:
         if not summary:
             return
         final_text = f"💭 思考\n{as_blockquote(summary)}"
-        await self._messenger.send_markdown(
-            chat_id, final_text, with_separator=False, with_session_prefix=False
-        )
+        await self._send_progress(chat_id, final_text, session_id=session_id)
 
-    async def _handle_item_completed(self, chat_id: str, item: dict) -> None:
+    async def _handle_item_completed(
+        self, chat_id: str, item: dict, *, session_id: int | None
+    ) -> None:
         item_type = item.get("type")
         if item_type == "reasoning":
-            await self._handle_item_reasoning(chat_id, item)
+            await self._handle_item_reasoning(chat_id, item, session_id=session_id)
             return
         if item_type == "agent_message":
             return
@@ -76,34 +72,23 @@ class CodexProgressHandler:
             if not self._verbosity.show_tool_messages(chat_id):
                 return
             tool_display = self._format_web_search_item(item)
-            await self._messenger.send_markdown(
-                chat_id,
-                f"🔧 工具\n{tool_display}",
-                with_separator=False,
-                with_session_prefix=False,
-            )
+            await self._send_progress(chat_id, f"🔧 工具\n{tool_display}", session_id=session_id)
             return
         if item_type == "file_change":
             if not self._verbosity.show_tool_messages(chat_id):
                 return
             tool_display = self._format_file_change_item(item)
-            await self._messenger.send_markdown(
-                chat_id,
-                f"🔧 工具\n{tool_display}",
-                with_separator=False,
-                with_session_prefix=False,
-            )
+            await self._send_progress(chat_id, f"🔧 工具\n{tool_display}", session_id=session_id)
             return
         if item_type == "command_execution":
             if not self._verbosity.show_tool_messages(chat_id):
                 return
             command = item.get("command", "")
             if command:
-                await self._messenger.send_markdown(
+                await self._send_progress(
                     chat_id,
                     format_code_block("⚙️ 执行命令", command),
-                    with_separator=False,
-                    with_session_prefix=False,
+                    session_id=session_id,
                 )
             return
         if item_type == "tool_use":
@@ -113,15 +98,12 @@ class CodexProgressHandler:
             tool_input = item.get("input", {})
             if tool_name:
                 tool_display = self._format_tool_use(tool_name, tool_input)
-                await self._messenger.send_markdown(
-                    chat_id,
-                    f"🔧 工具\n{tool_display}",
-                    with_separator=False,
-                    with_session_prefix=False,
-                )
+                await self._send_progress(chat_id, f"🔧 工具\n{tool_display}", session_id=session_id)
                 return
 
-    async def _handle_item_reasoning(self, chat_id: str, item: dict) -> None:
+    async def _handle_item_reasoning(
+        self, chat_id: str, item: dict, *, session_id: int | None
+    ) -> None:
         reasoning_text = ""
         item_text = item.get("text")
         if isinstance(item_text, str) and item_text:
@@ -140,13 +122,19 @@ class CodexProgressHandler:
             summary = self._summarize_reasoning(reasoning_text)
             if summary:
                 final_text = f"💭 思考\n{as_blockquote(summary)}"
-                await self._messenger.send_markdown(
-                    chat_id, final_text, with_separator=False, with_session_prefix=False
-                )
+                await self._send_progress(chat_id, final_text, session_id=session_id)
             return
 
+        await self._send_progress(chat_id, "💭 _思考中_...", session_id=session_id)
+
+    async def _send_progress(self, chat_id: str, text: str, *, session_id: int | None) -> None:
+        with_prefix = session_id is not None
         await self._messenger.send_markdown(
-            chat_id, "💭 _思考中_...", with_separator=False, with_session_prefix=False
+            chat_id,
+            text,
+            with_separator=False,
+            with_session_prefix=with_prefix,
+            session_id=session_id,
         )
 
     def _format_tool_use(self, tool_name: str, tool_input: dict) -> str:
