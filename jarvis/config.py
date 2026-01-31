@@ -90,6 +90,12 @@ class OutputConfig:
 
 
 @dataclass(slots=True)
+class WorkerConfig:
+    message_concurrency: int = 1
+    command_concurrency: int = 1
+
+
+@dataclass(slots=True)
 class SkillSourceConfig:
     name: str
     type: str = "github"
@@ -113,6 +119,7 @@ class AppConfig:
     logging: LoggingConfig
     triggers: TriggersConfig
     output: OutputConfig
+    workers: WorkerConfig
     skills: SkillsConfig
     config_path: str | None = None
 
@@ -139,6 +146,7 @@ def load_config(path: str | Path) -> AppConfig:
     memory_raw = data.get("memory", {}) or {}
     logging_raw = data.get("logging", {})
     output_raw = data.get("output", {})
+    workers_raw = data.get("workers", {}) or {}
     triggers_raw = data.get("triggers", {})
     skills_raw = data.get("skills", {})
 
@@ -171,6 +179,10 @@ def load_config(path: str | Path) -> AppConfig:
         ),
         output=OutputConfig(
             verbosity=str(output_raw.get("verbosity", "full")),
+        ),
+        workers=WorkerConfig(
+            message_concurrency=int(workers_raw.get("message_concurrency", 1)),
+            command_concurrency=int(workers_raw.get("command_concurrency", 1)),
         ),
         triggers=_parse_triggers(triggers_raw),
         skills=_parse_skills(skills_raw),

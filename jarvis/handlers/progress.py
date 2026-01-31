@@ -36,7 +36,7 @@ class CodexProgressHandler:
         if event_type == "thread.started":
             thread_id = event.get("thread_id")
             if thread_id:
-                await self._storage.upsert_session(chat_id, str(thread_id))
+                await self._storage.upsert_session(chat_id, str(thread_id), set_active=False)
             return
 
         if event_type == "event_msg":
@@ -61,7 +61,9 @@ class CodexProgressHandler:
         if not summary:
             return
         final_text = f"💭 思考\n{as_blockquote(summary)}"
-        await self._messenger.send_markdown(chat_id, final_text, with_separator=False)
+        await self._messenger.send_markdown(
+            chat_id, final_text, with_separator=False, with_session_prefix=False
+        )
 
     async def _handle_item_completed(self, chat_id: str, item: dict) -> None:
         item_type = item.get("type")
@@ -78,6 +80,7 @@ class CodexProgressHandler:
                 chat_id,
                 f"🔧 工具\n{tool_display}",
                 with_separator=False,
+                with_session_prefix=False,
             )
             return
         if item_type == "file_change":
@@ -88,6 +91,7 @@ class CodexProgressHandler:
                 chat_id,
                 f"🔧 工具\n{tool_display}",
                 with_separator=False,
+                with_session_prefix=False,
             )
             return
         if item_type == "command_execution":
@@ -99,6 +103,7 @@ class CodexProgressHandler:
                     chat_id,
                     format_code_block("⚙️ 执行命令", command),
                     with_separator=False,
+                    with_session_prefix=False,
                 )
             return
         if item_type == "tool_use":
@@ -112,6 +117,7 @@ class CodexProgressHandler:
                     chat_id,
                     f"🔧 工具\n{tool_display}",
                     with_separator=False,
+                    with_session_prefix=False,
                 )
                 return
 
@@ -134,10 +140,14 @@ class CodexProgressHandler:
             summary = self._summarize_reasoning(reasoning_text)
             if summary:
                 final_text = f"💭 思考\n{as_blockquote(summary)}"
-                await self._messenger.send_markdown(chat_id, final_text, with_separator=False)
+                await self._messenger.send_markdown(
+                    chat_id, final_text, with_separator=False, with_session_prefix=False
+                )
             return
 
-        await self._messenger.send_markdown(chat_id, "💭 _思考中_...", with_separator=False)
+        await self._messenger.send_markdown(
+            chat_id, "💭 _思考中_...", with_separator=False, with_session_prefix=False
+        )
 
     def _format_tool_use(self, tool_name: str, tool_input: dict) -> str:
         tool_display = _TOOL_USE_NAME_MAP.get(tool_name, tool_name)

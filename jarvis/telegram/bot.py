@@ -14,7 +14,7 @@ from telegram.ext import Application, ApplicationBuilder, CommandHandler, Contex
 
 from jarvis.config import TelegramConfig
 from jarvis.event_bus import EventBus
-from jarvis.events import TELEGRAM_COMMAND, TELEGRAM_MESSAGE_RECEIVED, TELEGRAM_SEND
+from jarvis.events import TELEGRAM_COMMAND, TELEGRAM_MESSAGE_RECEIVED, TELEGRAM_SEND, TELEGRAM_MESSAGE_SENT
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +84,7 @@ class TelegramBot:
             "user_id": str(update.effective_user.id) if update.effective_user else "",
             "text": text,
             "message_id": message.message_id,
+            "reply_to_message_id": message.reply_to_message.message_id if message.reply_to_message else None,
             "media_group_id": message.media_group_id,
             "attachments": attachments,
         }
@@ -111,6 +112,7 @@ class TelegramBot:
         text = event.payload.get("text")
         if not text:
             return
+        meta = event.payload.get("meta") or {}
         parse_mode = event.payload.get("parse_mode")
         use_markdown = event.payload.get("markdown", False)
         raw_text = text
@@ -128,7 +130,7 @@ class TelegramBot:
             # 不使用格式化，直接发送纯文本
             send_parse_mode = None
         try:
-            await self._send_text_chunks(chat_id, send_text, send_parse_mode)
+            await self._send_text_chunks(chat_id, send_text, send_parse_mode, meta)
         except BadRequest as exc:
             if _is_chat_not_found_error(exc):
                 logger.warning("Telegram chat not found (chat_id=%s); drop message.", chat_id)
@@ -136,7 +138,7 @@ class TelegramBot:
             if send_parse_mode:
                 logger.warning("Failed to send Markdown message, retrying as plain text: %s", exc)
                 try:
-                    await self._send_text_chunks(chat_id, raw_text, None)
+                    await self._send_text_chunks(chat_id, raw_text, None, meta)
                 except BadRequest as retry_exc:
                     if _is_chat_not_found_error(retry_exc):
                         logger.warning("Telegram chat not found (chat_id=%s); drop message.", chat_id)
@@ -148,13 +150,24 @@ class TelegramBot:
         if media_items:
             await self._send_media_items(chat_id, media_items, event.payload)
 
-    async def _send_text_chunks(self, chat_id: str, text: str, parse_mode: str | None) -> None:
+    async def _send_text_chunks(
+        self, chat_id: str, text: str, parse_mode: str | None, meta: dict
+    ) -> None:
         if not self._is_app_ready():
             return
         for chunk in _split_text(text, TELEGRAM_MESSAGE_MAX_CHARS):
             if not chunk:
                 continue
-            await self._app.bot.send_message(chat_id=chat_id, text=chunk, parse_mode=parse_mode)
+            sent = await self._app.bot.send_message(
+                chat_id=chat_id, text=chunk, parse_mode=parse_mode
+            )
+            payload = {
+                "chat_id": str(chat_id),
+                "message_id": sent.message_id,
+            }
+            if isinstance(meta, dict):
+                payload.update(meta)
+            await self._event_bus.publish(TELEGRAM_MESSAGE_SENT, payload)
 
     def _register_handlers(self, app: Application) -> None:
         for command, _description in COMMAND_SPECS:

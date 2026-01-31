@@ -6,9 +6,15 @@ import logging
 from jarvis.codex import CodexManager
 from jarvis.config import AppConfig
 from jarvis.event_bus import EventBus
-from jarvis.events import TELEGRAM_COMMAND, TELEGRAM_MESSAGE_RECEIVED, TRIGGER_FIRED
+from jarvis.events import (
+    TELEGRAM_COMMAND,
+    TELEGRAM_MESSAGE_RECEIVED,
+    TELEGRAM_MESSAGE_SENT,
+    TRIGGER_FIRED,
+)
 from jarvis.handlers.command_router import CommandRouter
 from jarvis.handlers.progress import CodexProgressHandler
+from jarvis.handlers.message_sent import MessageSentHandler
 from jarvis.handlers.trigger_dispatcher import TriggerDispatcher
 from jarvis.memory import MemoryManager
 from jarvis.messaging.bundler import MessageBundler
@@ -37,6 +43,7 @@ class JarvisApp:
         self._messenger = Messenger(self._event_bus, self._storage)
         self._verbosity = VerbosityManager(self._storage, config.output.verbosity)
         self._progress = CodexProgressHandler(self._messenger, self._storage, self._verbosity)
+        self._message_sent_handler = MessageSentHandler(self._storage)
         self._prompt_builder = PromptBuilder(self._memory)
         self._message_pipeline = MessagePipeline(
             self._codex,
@@ -46,7 +53,11 @@ class JarvisApp:
             self._messenger,
             self._verbosity,
         )
-        self._message_worker = QueueWorker(self._message_pipeline.handle, name="message-worker")
+        self._message_worker = QueueWorker(
+            self._message_pipeline.handle,
+            name="message-worker",
+            concurrency=config.workers.message_concurrency,
+        )
         self._command_router = CommandRouter(
             self._messenger,
             self._storage,
@@ -57,7 +68,11 @@ class JarvisApp:
             self._verbosity,
         )
         self._trigger_dispatcher = TriggerDispatcher(self._message_worker.enqueue)
-        self._command_worker = QueueWorker(self._command_router.handle, name="command-worker")
+        self._command_worker = QueueWorker(
+            self._command_router.handle,
+            name="command-worker",
+            concurrency=config.workers.command_concurrency,
+        )
         self._bundler = MessageBundler(
             config.telegram.bundle_wait_seconds,
             self._message_worker.enqueue,
@@ -65,6 +80,7 @@ class JarvisApp:
 
         self._event_bus.subscribe(TELEGRAM_MESSAGE_RECEIVED, self._bundler.handle_event)
         self._event_bus.subscribe(TELEGRAM_COMMAND, self._command_worker.enqueue)
+        self._event_bus.subscribe(TELEGRAM_MESSAGE_SENT, self._message_sent_handler.handle)
         self._event_bus.subscribe(TRIGGER_FIRED, self._trigger_dispatcher.handle)
 
     async def start(self) -> None:

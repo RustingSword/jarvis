@@ -34,13 +34,27 @@ class MessagePipeline:
         chat_id = event.payload.get("chat_id")
         text = event.payload.get("text", "")
         attachments = list(event.payload.get("attachments") or [])
+        reply_to_message_id = event.payload.get("reply_to_message_id")
         is_trigger = event.payload.get("source") == "trigger"
         if not chat_id or (not text and not attachments):
             return
 
         await self._verbosity.ensure(chat_id)
-        session = await self._storage.get_session(chat_id)
-        thread_id = None if is_trigger else (session.thread_id if session else None)
+        message_session = None
+        if reply_to_message_id:
+            message_session = await self._storage.get_message_session(chat_id, reply_to_message_id)
+            if message_session:
+                await self._storage.activate_session(chat_id, message_session.session_id)
+
+        active_session = await self._storage.get_session(chat_id)
+        thread_id = None
+        if not is_trigger:
+            if message_session:
+                thread_id = message_session.thread_id
+            elif active_session:
+                thread_id = active_session.thread_id
+
+        activate_on_complete = (not is_trigger) and (message_session is None) and (active_session is None)
 
         async def progress_callback(codex_event: dict) -> None:
             await self._progress.handle(chat_id, codex_event)
@@ -61,11 +75,39 @@ class MessagePipeline:
             await self._messenger.send_message(chat_id, f"Codex 调用失败: {exc}")
             return
 
-        if result.thread_id and not is_trigger:
-            await self._storage.upsert_session(chat_id, result.thread_id)
+        session_record = None
+        if result.thread_id:
+            session_record = await self._storage.upsert_session(
+                chat_id,
+                result.thread_id,
+                set_active=activate_on_complete and not is_trigger,
+            )
+
+        session_id_for_response = None
+        thread_id_for_response = None
+        if session_record:
+            session_id_for_response = session_record.session_id
+            thread_id_for_response = session_record.thread_id
+        elif message_session:
+            session_id_for_response = message_session.session_id
+            thread_id_for_response = message_session.thread_id
+        elif active_session:
+            session_id_for_response = active_session.session_id
+            thread_id_for_response = active_session.thread_id
 
         if result.media:
-            await self._messenger.send_media(chat_id, result.media)
+            await self._messenger.send_media(
+                chat_id,
+                result.media,
+                session_id=session_id_for_response,
+                thread_id=thread_id_for_response,
+            )
 
         response_text = result.response_text or "(无可用回复)"
-        await self._messenger.send_markdown(chat_id, response_text)
+        await self._messenger.send_markdown(
+            chat_id,
+            response_text,
+            with_session_prefix=not is_trigger,
+            session_id=session_id_for_response,
+            thread_id=thread_id_for_response,
+        )

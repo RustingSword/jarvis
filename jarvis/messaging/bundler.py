@@ -17,6 +17,7 @@ class PendingMessageBundle:
     attachments: list[dict] = field(default_factory=list)
     last_message_id: int | None = None
     media_group_id: str | None = None
+    reply_to_message_id: int | None = None
     flush_task: asyncio.Task | None = None
 
     def add_payload(self, payload: dict) -> None:
@@ -32,6 +33,9 @@ class PendingMessageBundle:
         media_group_id = payload.get("media_group_id")
         if media_group_id:
             self.media_group_id = str(media_group_id)
+        reply_to_message_id = payload.get("reply_to_message_id")
+        if isinstance(reply_to_message_id, int):
+            self.reply_to_message_id = reply_to_message_id
 
     def build_payload(self) -> dict:
         text = "\n".join(part for part in self.text_parts if part.strip())
@@ -41,6 +45,7 @@ class PendingMessageBundle:
             "text": text,
             "message_id": self.last_message_id,
             "media_group_id": self.media_group_id,
+            "reply_to_message_id": self.reply_to_message_id,
             "attachments": list(self.attachments),
             "bundle_count": len(self.text_parts) + len(self.attachments),
         }

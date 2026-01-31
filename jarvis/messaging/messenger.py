@@ -19,11 +19,25 @@ class Messenger:
         markdown: bool = False,
         parse_mode: str | None = None,
         with_session_prefix: bool = True,
+        session_id: int | None = None,
+        thread_id: str | None = None,
     ) -> None:
         final_text = text
         if with_session_prefix:
-            final_text = await self._with_session_prefix(chat_id, text, with_separator=with_separator)
+            final_text = await self._with_session_prefix(
+                chat_id,
+                text,
+                with_separator=with_separator,
+                session_id=session_id,
+            )
         payload: dict[str, object] = {"chat_id": chat_id, "text": final_text}
+        meta: dict[str, object] = {}
+        if session_id is not None:
+            meta["session_id"] = int(session_id)
+        if thread_id:
+            meta["thread_id"] = thread_id
+        if meta:
+            payload["meta"] = meta
         if markdown:
             payload["markdown"] = True
         if parse_mode:
@@ -36,8 +50,19 @@ class Messenger:
         text: str,
         *,
         with_separator: bool = True,
+        with_session_prefix: bool = True,
+        session_id: int | None = None,
+        thread_id: str | None = None,
     ) -> None:
-        await self.send_message(chat_id, text, markdown=True, with_separator=with_separator)
+        await self.send_message(
+            chat_id,
+            text,
+            markdown=True,
+            with_separator=with_separator,
+            with_session_prefix=with_session_prefix,
+            session_id=session_id,
+            thread_id=thread_id,
+        )
 
     async def send_media(
         self,
@@ -46,12 +71,21 @@ class Messenger:
         *,
         text: str | None = None,
         markdown: bool = False,
+        session_id: int | None = None,
+        thread_id: str | None = None,
     ) -> None:
         payload: dict[str, object] = {"chat_id": chat_id, "media": media}
         if text:
             payload["text"] = text
         if markdown:
             payload["markdown"] = True
+        meta: dict[str, object] = {}
+        if session_id is not None:
+            meta["session_id"] = int(session_id)
+        if thread_id:
+            meta["thread_id"] = thread_id
+        if meta:
+            payload["meta"] = meta
         await self._event_bus.publish(TELEGRAM_SEND, payload)
 
     async def _with_session_prefix(
@@ -60,11 +94,14 @@ class Messenger:
         text: str,
         *,
         with_separator: bool = True,
+        session_id: int | None = None,
     ) -> str:
-        session = await self._storage.get_session(chat_id)
-        if not session:
-            return text
-        bare_prefix = f"[{session.session_id}]"
+        if session_id is None:
+            session = await self._storage.get_session(chat_id)
+            if not session:
+                return text
+            session_id = session.session_id
+        bare_prefix = f"[{int(session_id)}]"
         prefix = f"> Session {bare_prefix}"
         stripped = text.lstrip()
         if stripped.startswith(prefix) or stripped.startswith(bare_prefix):

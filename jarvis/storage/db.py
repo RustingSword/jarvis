@@ -24,6 +24,12 @@ class SessionRecord:
 
 
 @dataclass(slots=True)
+class MessageSession:
+    session_id: int
+    thread_id: str
+
+
+@dataclass(slots=True)
 class MonitorRecord:
     id: int
     chat_id: str
@@ -94,6 +100,21 @@ class Storage:
                 PRIMARY KEY (chat_id, key)
             );
             """
+        )
+        await self._conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS message_sessions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                chat_id TEXT NOT NULL,
+                message_id INTEGER NOT NULL,
+                session_id INTEGER NOT NULL,
+                thread_id TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+            """
+        )
+        await self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_message_sessions_lookup ON message_sessions(chat_id, message_id);"
         )
         await self._conn.commit()
 
@@ -166,6 +187,29 @@ class Storage:
             for row in rows
         ]
 
+    async def get_session_by_thread_id(self, chat_id: str, thread_id: str) -> Optional[SessionRecord]:
+        conn = self._require_conn()
+        async with conn.execute(
+            """
+            SELECT id, chat_id, thread_id, created_at, last_active
+            FROM session_history
+            WHERE chat_id = ? AND thread_id = ?
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (chat_id, thread_id),
+        ) as cursor:
+            row = await cursor.fetchone()
+        if not row:
+            return None
+        return SessionRecord(
+            chat_id=row[1],
+            session_id=int(row[0]),
+            thread_id=row[2],
+            created_at=_parse_ts(row[3]),
+            last_active=_parse_ts(row[4]),
+        )
+
     async def activate_session(self, chat_id: str, session_id: int) -> Optional[SessionRecord]:
         record = await self.get_session_by_id(chat_id, session_id)
         if not record:
@@ -197,25 +241,43 @@ class Storage:
             last_active=_parse_ts(now),
         )
 
-    async def upsert_session(self, chat_id: str, thread_id: str) -> SessionRecord:
+    async def upsert_session(
+        self, chat_id: str, thread_id: str, *, set_active: bool = True
+    ) -> SessionRecord:
         conn = self._require_conn()
         now = datetime.now(timezone.utc).isoformat()
-        current = await self.get_session(chat_id)
-        if current and current.thread_id == thread_id:
-            await conn.execute(
-                "UPDATE sessions SET last_active = ? WHERE chat_id = ?",
-                (now, chat_id),
-            )
+        existing = await self.get_session_by_thread_id(chat_id, thread_id)
+        if existing:
             await conn.execute(
                 "UPDATE session_history SET last_active = ? WHERE id = ?",
-                (now, current.session_id),
+                (now, existing.session_id),
             )
+            if set_active:
+                await conn.execute(
+                    """
+                    INSERT INTO sessions (chat_id, session_id, thread_id, created_at, last_active)
+                    VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT(chat_id) DO UPDATE SET
+                        session_id = excluded.session_id,
+                        thread_id = excluded.thread_id,
+                        created_at = excluded.created_at,
+                        last_active = excluded.last_active
+                    """,
+                    (chat_id, existing.session_id, thread_id, existing.created_at.isoformat(), now),
+                )
+            else:
+                current = await self.get_session(chat_id)
+                if current and current.thread_id == thread_id:
+                    await conn.execute(
+                        "UPDATE sessions SET last_active = ? WHERE chat_id = ?",
+                        (now, chat_id),
+                    )
             await conn.commit()
             return SessionRecord(
                 chat_id=chat_id,
-                session_id=current.session_id,
+                session_id=existing.session_id,
                 thread_id=thread_id,
-                created_at=current.created_at,
+                created_at=existing.created_at,
                 last_active=_parse_ts(now),
             )
 
@@ -227,18 +289,26 @@ class Storage:
             (chat_id, thread_id, now, now),
         )
         session_id = cursor.lastrowid
-        await conn.execute(
-            """
-            INSERT INTO sessions (chat_id, session_id, thread_id, created_at, last_active)
-            VALUES (?, ?, ?, ?, ?)
-            ON CONFLICT(chat_id) DO UPDATE SET
-                session_id = excluded.session_id,
-                thread_id = excluded.thread_id,
-                created_at = excluded.created_at,
-                last_active = excluded.last_active
-            """,
-            (chat_id, session_id, thread_id, now, now),
-        )
+        if set_active:
+            await conn.execute(
+                """
+                INSERT INTO sessions (chat_id, session_id, thread_id, created_at, last_active)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(chat_id) DO UPDATE SET
+                    session_id = excluded.session_id,
+                    thread_id = excluded.thread_id,
+                    created_at = excluded.created_at,
+                    last_active = excluded.last_active
+                """,
+                (chat_id, session_id, thread_id, now, now),
+            )
+        else:
+            current = await self.get_session(chat_id)
+            if current and current.thread_id == thread_id:
+                await conn.execute(
+                    "UPDATE sessions SET last_active = ? WHERE chat_id = ?",
+                    (now, chat_id),
+                )
         await conn.commit()
         return SessionRecord(
             chat_id=chat_id,
@@ -252,6 +322,41 @@ class Storage:
         conn = self._require_conn()
         await conn.execute("DELETE FROM sessions WHERE chat_id = ?", (chat_id,))
         await conn.commit()
+
+    async def save_message_session(
+        self,
+        chat_id: str,
+        message_id: int,
+        session_id: int,
+        thread_id: str,
+    ) -> None:
+        conn = self._require_conn()
+        now = datetime.now(timezone.utc).isoformat()
+        await conn.execute(
+            """
+            INSERT INTO message_sessions (chat_id, message_id, session_id, thread_id, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (chat_id, int(message_id), int(session_id), thread_id, now),
+        )
+        await conn.commit()
+
+    async def get_message_session(self, chat_id: str, message_id: int) -> Optional[MessageSession]:
+        conn = self._require_conn()
+        async with conn.execute(
+            """
+            SELECT session_id, thread_id
+            FROM message_sessions
+            WHERE chat_id = ? AND message_id = ?
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (chat_id, int(message_id)),
+        ) as cursor:
+            row = await cursor.fetchone()
+        if not row:
+            return None
+        return MessageSession(session_id=int(row[0]), thread_id=str(row[1]))
 
     async def save_summary(self, chat_id: str, summary: str) -> str:
         self._session_dir.mkdir(parents=True, exist_ok=True)

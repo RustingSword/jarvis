@@ -32,6 +32,10 @@ logging:
 output:
   verbosity: "full"  # full: 输出工具调用与思考; compact: 仅输出思考和最终结果
 
+workers:
+  message_concurrency: 1
+  command_concurrency: 1
+
 triggers:
   scheduler:
     - name: "daily_summary"
