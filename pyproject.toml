@@ -18,6 +18,7 @@ dependencies = [
   "aiohttp>=3.9.5",
   "psutil>=5.9.8",
   "telegramify-markdown>=0.5.4",
+  "python-dotenv>=1.2.1",
 ]
 
 [project.scripts]

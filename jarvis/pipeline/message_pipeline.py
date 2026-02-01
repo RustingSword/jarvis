@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import logging
 
-from jarvis.codex import CodexProcessError, CodexTimeoutError, CodexManager
+from jarvis.audio.transcriber import TranscriptionService
+from jarvis.codex import CodexManager, CodexProcessError, CodexTimeoutError
 from jarvis.event_bus import Event
 from jarvis.handlers.progress import CodexProgressHandler
 from jarvis.messaging.messenger import Messenger
-from jarvis.audio.transcriber import TranscriptionService
 from jarvis.pipeline.prompt_builder import PromptBuilder
 from jarvis.storage import Storage
 from jarvis.verbosity import VerbosityManager
@@ -62,7 +62,9 @@ class MessagePipeline:
             elif active_session:
                 thread_id = active_session.thread_id
 
-        activate_on_complete = (not is_trigger) and (message_session is None) and (active_session is None)
+        activate_on_complete = (
+            (not is_trigger) and (message_session is None) and (active_session is None)
+        )
 
         progress_state = {"session_id": None, "thread_id": None}
         if message_session:

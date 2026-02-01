@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 
-from jarvis.codex import CodexProcessError, CodexTimeoutError, CodexManager
+from jarvis.codex import CodexManager, CodexProcessError, CodexTimeoutError
 from jarvis.event_bus import Event
 from jarvis.messaging.messenger import Messenger
 from jarvis.pipeline.prompt_builder import PromptBuilder

@@ -10,11 +10,23 @@ import telegramify_markdown
 from telegram import BotCommand, Update
 from telegram.constants import ParseMode
 from telegram.error import BadRequest
-from telegram.ext import Application, ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters
+from telegram.ext import (
+    Application,
+    ApplicationBuilder,
+    CommandHandler,
+    ContextTypes,
+    MessageHandler,
+    filters,
+)
 
 from jarvis.config import TelegramConfig
 from jarvis.event_bus import EventBus
-from jarvis.events import TELEGRAM_COMMAND, TELEGRAM_MESSAGE_RECEIVED, TELEGRAM_SEND, TELEGRAM_MESSAGE_SENT
+from jarvis.events import (
+    TELEGRAM_COMMAND,
+    TELEGRAM_MESSAGE_RECEIVED,
+    TELEGRAM_MESSAGE_SENT,
+    TELEGRAM_SEND,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +97,9 @@ class TelegramBot:
             "user_id": str(update.effective_user.id) if update.effective_user else "",
             "text": text,
             "message_id": message.message_id,
-            "reply_to_message_id": message.reply_to_message.message_id if message.reply_to_message else None,
+            "reply_to_message_id": message.reply_to_message.message_id
+            if message.reply_to_message
+            else None,
             "media_group_id": message.media_group_id,
             "attachments": attachments,
         }
@@ -144,12 +158,16 @@ class TelegramBot:
                     logger.warning("Telegram chat not found (chat_id=%s); drop message.", chat_id)
                     return
                 if send_parse_mode:
-                    logger.warning("Failed to send Markdown message, retrying as plain text: %s", exc)
+                    logger.warning(
+                        "Failed to send Markdown message, retrying as plain text: %s", exc
+                    )
                     try:
                         await self._send_text_chunks(chat_id, raw_text, None, meta)
                     except BadRequest as retry_exc:
                         if _is_chat_not_found_error(retry_exc):
-                            logger.warning("Telegram chat not found (chat_id=%s); drop message.", chat_id)
+                            logger.warning(
+                                "Telegram chat not found (chat_id=%s); drop message.", chat_id
+                            )
                             return
                         raise
                 else:
@@ -191,7 +209,9 @@ class TelegramBot:
             | filters.VIDEO_NOTE
             | filters.ANIMATION
         )
-        app.add_handler(MessageHandler((filters.TEXT | media_filters) & ~filters.COMMAND, self._handle_message))
+        app.add_handler(
+            MessageHandler((filters.TEXT | media_filters) & ~filters.COMMAND, self._handle_message)
+        )
 
     async def _collect_attachments(self, message) -> list[dict[str, Any]]:
         attachments: list[dict[str, Any]] = []
@@ -302,7 +322,9 @@ class TelegramBot:
             suffix = Path(filename_hint).suffix
 
         safe_hint = _sanitize_filename(filename_hint) if filename_hint else ""
-        raw_unique = getattr(file_obj, "file_unique_id", None) or getattr(file_obj, "file_id", "file")
+        raw_unique = getattr(file_obj, "file_unique_id", None) or getattr(
+            file_obj, "file_id", "file"
+        )
         unique_id = _sanitize_filename(str(raw_unique))
 
         if safe_hint:
@@ -322,7 +344,9 @@ class TelegramBot:
         except Exception:
             logger.exception("Failed to create media dir: %s", self._media_dir)
 
-    async def _send_media_items(self, chat_id: str, media_items: list[dict[str, Any]], payload: dict) -> None:
+    async def _send_media_items(
+        self, chat_id: str, media_items: list[dict[str, Any]], payload: dict
+    ) -> None:
         if not self._is_app_ready():
             return
         logger.info("Preparing to send %d media item(s) to chat_id=%s", len(media_items), chat_id)
@@ -336,7 +360,9 @@ class TelegramBot:
             parse_mode = item.get("parse_mode")
             try:
                 logger.info("Sending media: type=%s path=%s", kind, path)
-                await self._send_single_media(chat_id, kind, path, caption=caption, parse_mode=parse_mode)
+                await self._send_single_media(
+                    chat_id, kind, path, caption=caption, parse_mode=parse_mode
+                )
             except Exception:
                 logger.exception("Failed to send media: %s", path)
 
@@ -399,11 +425,15 @@ class TelegramBot:
                     caption=caption,
                     parse_mode=parse_mode,
                 )
-                logger.info("Media sent (animation): path=%s message_id=%s", file_path, sent.message_id)
+                logger.info(
+                    "Media sent (animation): path=%s message_id=%s", file_path, sent.message_id
+                )
                 return
             if kind == "video_note":
                 sent = await self._app.bot.send_video_note(chat_id=chat_id, video_note=file_path)
-                logger.info("Media sent (video_note): path=%s message_id=%s", file_path, sent.message_id)
+                logger.info(
+                    "Media sent (video_note): path=%s message_id=%s", file_path, sent.message_id
+                )
                 return
             sent = await self._app.bot.send_document(
                 chat_id=chat_id,
@@ -414,7 +444,9 @@ class TelegramBot:
             logger.info("Media sent (document): path=%s message_id=%s", file_path, sent.message_id)
         except BadRequest as exc:
             if _is_chat_not_found_error(exc):
-                logger.warning("Telegram chat not found (chat_id=%s); skip media: %s", chat_id, file_path)
+                logger.warning(
+                    "Telegram chat not found (chat_id=%s); skip media: %s", chat_id, file_path
+                )
                 return
             raise
 

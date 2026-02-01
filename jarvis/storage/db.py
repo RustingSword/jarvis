@@ -114,7 +114,8 @@ class Storage:
             """
         )
         await self._conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_message_sessions_lookup ON message_sessions(chat_id, message_id);"
+            "CREATE INDEX IF NOT EXISTS idx_message_sessions_lookup ON "
+            "message_sessions(chat_id, message_id);"
         )
         await self._conn.commit()
 
@@ -126,7 +127,8 @@ class Storage:
     async def get_session(self, chat_id: str) -> Optional[SessionRecord]:
         conn = self._require_conn()
         async with conn.execute(
-            "SELECT chat_id, session_id, thread_id, created_at, last_active FROM sessions WHERE chat_id = ?",
+            "SELECT chat_id, session_id, thread_id, created_at, last_active "
+            "FROM sessions WHERE chat_id = ?",
             (chat_id,),
         ) as cursor:
             row = await cursor.fetchone()
@@ -187,7 +189,9 @@ class Storage:
             for row in rows
         ]
 
-    async def get_session_by_thread_id(self, chat_id: str, thread_id: str) -> Optional[SessionRecord]:
+    async def get_session_by_thread_id(
+        self, chat_id: str, thread_id: str
+    ) -> Optional[SessionRecord]:
         conn = self._require_conn()
         async with conn.execute(
             """

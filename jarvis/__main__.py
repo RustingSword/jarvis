@@ -3,9 +3,9 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import signal
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-import signal
 
 from jarvis.app import JarvisApp
 from jarvis.config import load_config

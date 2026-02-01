@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import logging
 import json
+import logging
 
 from jarvis.formatting import as_blockquote, format_code_block, format_tool_path
 from jarvis.messaging.messenger import Messenger
@@ -98,7 +98,9 @@ class CodexProgressHandler:
             tool_input = item.get("input", {})
             if tool_name:
                 tool_display = self._format_tool_use(tool_name, tool_input)
-                await self._send_progress(chat_id, f"🔧 工具\n{tool_display}", session_id=session_id)
+                await self._send_progress(
+                    chat_id, f"🔧 工具\n{tool_display}", session_id=session_id
+                )
                 return
 
     async def _handle_item_reasoning(

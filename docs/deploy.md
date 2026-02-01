@@ -10,7 +10,7 @@ sudo chown -R jarvis:jarvis /opt/jarvis /var/lib/jarvis /var/log/jarvis
 
 ## 2. 上传代码与安装依赖
 
-你可以使用一键安装脚本（推荐）：  
+你可以使用一键安装脚本（推荐）：
 
 ```bash
 sudo /opt/jarvis/scripts/install.sh

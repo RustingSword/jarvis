@@ -17,7 +17,9 @@ MAX_FILE_BYTES = 25 * 1024 * 1024
 
 
 class TranscriptionService:
-    def __init__(self, config: OpenAIAudioConfig, api_key: str | None, base_url: str | None) -> None:
+    def __init__(
+        self, config: OpenAIAudioConfig, api_key: str | None, base_url: str | None
+    ) -> None:
         self._config = config
         self._api_key = api_key
         self._base_url = (base_url or DEFAULT_OPENAI_BASE_URL).rstrip("/")
@@ -28,15 +30,24 @@ class TranscriptionService:
         return bool(self._config.enabled and self._api_key)
 
     async def process(self, text: str, attachments: list[dict]) -> tuple[str, list[dict]]:
-        audio_items = [item for item in attachments if (item.get("type") or "").lower() in SUPPORTED_AUDIO_TYPES]
+        audio_items = [
+            item
+            for item in attachments
+            if (item.get("type") or "").lower() in SUPPORTED_AUDIO_TYPES
+        ]
         other_items = [
-            item for item in attachments if (item.get("type") or "").lower() not in SUPPORTED_AUDIO_TYPES
+            item
+            for item in attachments
+            if (item.get("type") or "").lower() not in SUPPORTED_AUDIO_TYPES
         ]
         if not audio_items:
             return text, attachments
 
         if not self.enabled:
-            logger.info("Audio transcription disabled or missing API key; dropping %d audio item(s).", len(audio_items))
+            logger.info(
+                "Audio transcription disabled or missing API key; dropping %d audio item(s).",
+                len(audio_items),
+            )
             return text, other_items
 
         transcripts: list[str] = []
@@ -119,11 +130,15 @@ class TranscriptionService:
                                 if attempt < self._config.max_retries:
                                     await asyncio.sleep(self._backoff(attempt))
                                     continue
-                                logger.warning("Transcription failed after retries: HTTP %s", resp.status)
+                                logger.warning(
+                                    "Transcription failed after retries: HTTP %s", resp.status
+                                )
                                 return None
 
                             if resp.status >= 400:
-                                logger.warning("Transcription request rejected: HTTP %s", resp.status)
+                                logger.warning(
+                                    "Transcription request rejected: HTTP %s", resp.status
+                                )
                                 return None
 
                             transcript = await self._parse_transcription_response(resp)

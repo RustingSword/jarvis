@@ -4,8 +4,8 @@ import asyncio
 import json
 import logging
 import re
-from pathlib import Path
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Awaitable, Callable, Iterable, List, Optional
 
 from jarvis.config import CodexConfig
@@ -49,7 +49,9 @@ class CodexManager:
         last_error: Exception | None = None
         for attempt in range(self._config.max_retries + 1):
             try:
-                return await self._run_once(prompt, session_id=session_id, progress_callback=progress_callback)
+                return await self._run_once(
+                    prompt, session_id=session_id, progress_callback=progress_callback
+                )
             except CodexTimeoutError as exc:
                 last_error = exc
                 if attempt >= self._config.max_retries:
@@ -109,7 +111,11 @@ class CodexManager:
         if media:
             logger.info("Extracted %d media item(s) from response.", len(media))
             for item in media:
-                logger.info("Media item: type=%s path=%s", item.get("type"), item.get("path") or item.get("file"))
+                logger.info(
+                    "Media item: type=%s path=%s",
+                    item.get("type"),
+                    item.get("path") or item.get("file"),
+                )
         else:
             logger.info("No media items extracted from response.")
         response_text = _strip_media_markers(response_text)
@@ -117,7 +123,9 @@ class CodexManager:
         if proc.returncode != 0:
             raise CodexProcessError(f"Codex exited with code {proc.returncode}: {stderr_text}")
 
-        return CodexResult(thread_id=thread_id, response_text=response_text, events=events, media=media)
+        return CodexResult(
+            thread_id=thread_id, response_text=response_text, events=events, media=media
+        )
 
     async def _read_stdout_with_callback(
         self,
@@ -185,7 +193,12 @@ class CodexManager:
         return self._config.retry_backoff_seconds * (2**attempt)
 
     def _build_command(self, prompt: str, session_id: str | None) -> list[str]:
-        cmd = [self._config.exec_path, "exec", "--json", "--dangerously-bypass-approvals-and-sandbox"]
+        cmd = [
+            self._config.exec_path,
+            "exec",
+            "--json",
+            "--dangerously-bypass-approvals-and-sandbox",
+        ]
         if session_id:
             cmd.extend(["resume", session_id])
         cmd.append(prompt)

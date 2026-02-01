@@ -29,7 +29,7 @@ class QueueWorker:
         if self._tasks:
             return
         for idx in range(self._concurrency):
-            task_name = f"{self._name}-{idx+1}"
+            task_name = f"{self._name}-{idx + 1}"
             self._tasks.append(asyncio.create_task(self._run(), name=task_name))
 
     async def stop(self) -> None:

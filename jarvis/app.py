@@ -4,6 +4,8 @@ import asyncio
 import logging
 import os
 
+from dotenv import load_dotenv
+
 from jarvis.audio.transcriber import TranscriptionService
 from jarvis.codex import CodexManager
 from jarvis.config import AppConfig
@@ -15,8 +17,8 @@ from jarvis.events import (
     TRIGGER_FIRED,
 )
 from jarvis.handlers.command_router import CommandRouter
-from jarvis.handlers.progress import CodexProgressHandler
 from jarvis.handlers.message_sent import MessageSentHandler
+from jarvis.handlers.progress import CodexProgressHandler
 from jarvis.handlers.trigger_dispatcher import TriggerDispatcher
 from jarvis.memory import MemoryManager
 from jarvis.messaging.bundler import MessageBundler
@@ -29,6 +31,8 @@ from jarvis.telegram import TelegramBot
 from jarvis.triggers import TriggerManager
 from jarvis.verbosity import VerbosityManager
 from jarvis.workers import QueueWorker
+
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 

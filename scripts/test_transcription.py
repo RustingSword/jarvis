@@ -10,6 +10,9 @@ import sys
 from pathlib import Path
 
 import aiohttp
+from dotenv import load_dotenv
+
+load_dotenv()
 
 
 def _pick_output_path() -> Path:

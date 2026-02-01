@@ -275,9 +275,7 @@ class MemoryManager:
         await conn.execute("DELETE FROM chunks WHERE path = ?", (entry.path,))
         await conn.execute("DELETE FROM chunks_fts WHERE path = ?", (entry.path,))
         for chunk in chunks:
-            chunk_id = _hash_text(
-                f"{entry.path}:{chunk.start_line}:{chunk.end_line}:{chunk.hash}"
-            )
+            chunk_id = _hash_text(f"{entry.path}:{chunk.start_line}:{chunk.end_line}:{chunk.hash}")
             await conn.execute(
                 """
                 INSERT INTO chunks (id, path, start_line, end_line, hash, text, updated_at)

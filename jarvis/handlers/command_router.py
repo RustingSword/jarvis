@@ -5,8 +5,8 @@ import logging
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta, timezone
 
-from jarvis.codex import CodexError, CodexProcessError, CodexTimeoutError, CodexManager
-from jarvis.config import SkillSourceConfig, SkillsConfig, persist_skill_source
+from jarvis.codex import CodexError, CodexManager, CodexProcessError, CodexTimeoutError
+from jarvis.config import SkillsConfig, SkillSourceConfig, persist_skill_source
 from jarvis.event_bus import Event
 from jarvis.formatting import format_code_block
 from jarvis.memory import MemoryManager
@@ -84,10 +84,17 @@ class CommandRouter:
                     "- `/compact` - 压缩对话历史并重置",
                     "- `/resume <id>` - 恢复历史会话（不带 id 会列出最近会话）",
                     "- `/verbosity <full|compact|reset>` - 控制输出详细程度",
-                    "- `/skills sources` | `/skills list [source]` | `/skills installed` | "
-                    "`/skills install <source> <name>` | `/skills add-source <name> <repo> <path> [ref] [token_env]` - skills 管理",
-                    "- `/memory search <关键词>` | `/memory add <内容>` | `/memory get <path> [from] [lines]` | "
-                    "`/memory index` | `/memory status` - 记忆功能",
+                    (
+                        "- `/skills sources` | `/skills list [source]` | `/skills installed` | "
+                        "`/skills install <source> <name>` | "
+                        "`/skills add-source <name> <repo> <path> "
+                        "[ref] [token_env]` - skills 管理"
+                    ),
+                    (
+                        "- `/memory search <关键词>` | `/memory add <内容>` | "
+                        "`/memory get <path> [from] [lines]` | "
+                        "`/memory index` | `/memory status` - 记忆功能"
+                    ),
                     "",
                     "提示：每条消息前会显示会话标识，如 `> [12]`。",
                 ]
@@ -191,7 +198,9 @@ class CommandRouter:
         try:
             normalized = await self._verbosity.set(chat_id, args[0])
         except ValueError:
-            await self._messenger.send_markdown(chat_id, "**用法**: `/verbosity full|compact|reset`")
+            await self._messenger.send_markdown(
+                chat_id, "**用法**: `/verbosity full|compact|reset`"
+            )
             return
 
         await self._messenger.send_markdown(chat_id, f"verbosity 已设置为: `{normalized}`")
@@ -213,10 +222,7 @@ class CommandRouter:
         except CodexProcessError as exc:
             error_msg = str(exc)
             if "UTF-8" in error_msg:
-                error_msg = (
-                    "会话文件可能已损坏。建议使用 `/reset` 重置会话。\n"
-                    f"技术详情: {exc}"
-                )
+                error_msg = f"会话文件可能已损坏。建议使用 `/reset` 重置会话。\n技术详情: {exc}"
             await self._messenger.send_markdown(chat_id, f"会话压缩失败: {error_msg}")
             return
 
@@ -357,7 +363,9 @@ class CommandRouter:
 
         if action == "install":
             if len(args) < 3:
-                await self._messenger.send_markdown(chat_id, "**用法**: `/skills install <source> <name>`")
+                await self._messenger.send_markdown(
+                    chat_id, "**用法**: `/skills install <source> <name>`"
+                )
                 return
             source_name = args[1]
             skill_name = args[2]
