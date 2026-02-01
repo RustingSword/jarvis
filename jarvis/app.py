@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 
+from jarvis.audio.transcriber import TranscriptionService
 from jarvis.codex import CodexManager
 from jarvis.config import AppConfig
 from jarvis.event_bus import EventBus
@@ -38,6 +40,10 @@ class JarvisApp:
         self._storage = Storage(config.storage)
         self._codex = CodexManager(config.codex)
         self._memory = MemoryManager(config.memory)
+        self._transcriber = TranscriptionService(
+            config.openai.audio,
+            os.getenv("OPENAI_API_KEY"),
+        )
         self._telegram = TelegramBot(config.telegram, self._event_bus)
         self._triggers = TriggerManager(self._event_bus, config.triggers)
 
@@ -53,6 +59,7 @@ class JarvisApp:
             self._progress,
             self._messenger,
             self._verbosity,
+            self._transcriber,
         )
         self._message_worker = QueueWorker(
             self._message_pipeline.handle,

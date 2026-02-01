@@ -10,6 +10,15 @@ codex:
   max_retries: 2
   retry_backoff_seconds: 0.5
 
+openai:
+  audio:
+    enabled: true
+    model: "whisper-1"
+    response_format: "json"
+    timeout_seconds: 30
+    max_retries: 2
+    retry_backoff_seconds: 0.5
+
 storage:
   db_path: "~/.jarvis/jarvis.db"
   session_dir: "~/.jarvis/sessions"

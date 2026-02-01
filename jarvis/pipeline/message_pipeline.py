@@ -6,6 +6,7 @@ from jarvis.codex import CodexProcessError, CodexTimeoutError, CodexManager
 from jarvis.event_bus import Event
 from jarvis.handlers.progress import CodexProgressHandler
 from jarvis.messaging.messenger import Messenger
+from jarvis.audio.transcriber import TranscriptionService
 from jarvis.pipeline.prompt_builder import PromptBuilder
 from jarvis.storage import Storage
 from jarvis.verbosity import VerbosityManager
@@ -22,6 +23,7 @@ class MessagePipeline:
         progress_handler: CodexProgressHandler,
         messenger: Messenger,
         verbosity: VerbosityManager,
+        transcriber: TranscriptionService | None = None,
     ) -> None:
         self._codex = codex
         self._storage = storage
@@ -29,6 +31,7 @@ class MessagePipeline:
         self._progress = progress_handler
         self._messenger = messenger
         self._verbosity = verbosity
+        self._transcriber = transcriber
 
     async def handle(self, event: Event) -> None:
         chat_id = event.payload.get("chat_id")
@@ -38,6 +41,11 @@ class MessagePipeline:
         is_trigger = event.payload.get("source") == "trigger"
         if not chat_id or (not text and not attachments):
             return
+
+        if self._transcriber:
+            text, attachments = await self._transcriber.process(text, attachments)
+            if not text and not attachments:
+                return
 
         await self._verbosity.ensure(chat_id)
         message_session = None

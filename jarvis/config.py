@@ -60,6 +60,21 @@ class CodexConfig:
 
 
 @dataclass(slots=True)
+class OpenAIAudioConfig:
+    enabled: bool = True
+    model: str = "whisper-1"
+    response_format: str = "json"
+    timeout_seconds: int = 30
+    max_retries: int = 2
+    retry_backoff_seconds: float = 0.5
+
+
+@dataclass(slots=True)
+class OpenAIConfig:
+    audio: OpenAIAudioConfig
+
+
+@dataclass(slots=True)
 class StorageConfig:
     db_path: str
     session_dir: str
@@ -115,6 +130,7 @@ class SkillsConfig:
 class AppConfig:
     telegram: TelegramConfig
     codex: CodexConfig
+    openai: OpenAIConfig
     storage: StorageConfig
     memory: MemoryConfig
     logging: LoggingConfig
@@ -143,6 +159,7 @@ def load_config(path: str | Path) -> AppConfig:
 
     telegram_raw = _require(data, "telegram")
     codex_raw = _require(data, "codex")
+    openai_raw = data.get("openai", {}) or {}
     storage_raw = _require(data, "storage")
     memory_raw = data.get("memory", {}) or {}
     logging_raw = data.get("logging", {})
@@ -167,6 +184,7 @@ def load_config(path: str | Path) -> AppConfig:
             max_retries=int(codex_raw.get("max_retries", 2)),
             retry_backoff_seconds=float(codex_raw.get("retry_backoff_seconds", 0.5)),
         ),
+        openai=_parse_openai(openai_raw),
         storage=StorageConfig(
             db_path=_require(storage_raw, "db_path"),
             session_dir=_require(storage_raw, "session_dir"),
@@ -252,6 +270,23 @@ def _apply_env_overrides(config: AppConfig) -> AppConfig:
         config.output.verbosity = verbosity
 
     return config
+
+
+def _parse_openai(raw: Any) -> OpenAIConfig:
+    if not isinstance(raw, dict):
+        raw = {}
+    audio_raw = raw.get("audio", {}) or {}
+    if not isinstance(audio_raw, dict):
+        audio_raw = {}
+    audio_config = OpenAIAudioConfig(
+        enabled=bool(audio_raw.get("enabled", True)),
+        model=str(audio_raw.get("model", "whisper-1")),
+        response_format=str(audio_raw.get("response_format", "json")),
+        timeout_seconds=int(audio_raw.get("timeout_seconds", 30)),
+        max_retries=int(audio_raw.get("max_retries", 2)),
+        retry_backoff_seconds=float(audio_raw.get("retry_backoff_seconds", 0.5)),
+    )
+    return OpenAIConfig(audio=audio_config)
 
 
 def _parse_triggers(raw: Any) -> TriggersConfig:
