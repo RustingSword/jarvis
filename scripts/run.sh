@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CONFIG_PATH="${CONFIG_PATH:-${ROOT_DIR}/config.yaml}"
-PID_FILE="${ROOT_DIR}/jarvis.pid"
+PID_FILE="${ROOT_DIR}/.jarvis.pid"
 
 if [ -f "${ROOT_DIR}/.env" ]; then
   set -a
