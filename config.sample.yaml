@@ -11,6 +11,7 @@ codex:
   retry_backoff_seconds: 0.5
 
 openai:
+  base_url: "https://api.openai.com"
   audio:
     enabled: true
     model: "whisper-1"

@@ -11,15 +11,17 @@ from jarvis.config import OpenAIAudioConfig
 
 logger = logging.getLogger(__name__)
 
-OPENAI_TRANSCRIPTIONS_URL = "https://api.openai.com/v1/audio/transcriptions"
+DEFAULT_OPENAI_BASE_URL = "https://api.openai.com"
 SUPPORTED_AUDIO_TYPES = {"audio", "voice"}
 MAX_FILE_BYTES = 25 * 1024 * 1024
 
 
 class TranscriptionService:
-    def __init__(self, config: OpenAIAudioConfig, api_key: str | None) -> None:
+    def __init__(self, config: OpenAIAudioConfig, api_key: str | None, base_url: str | None) -> None:
         self._config = config
         self._api_key = api_key
+        self._base_url = (base_url or DEFAULT_OPENAI_BASE_URL).rstrip("/")
+        self._transcriptions_url = f"{self._base_url}/v1/audio/transcriptions"
 
     @property
     def enabled(self) -> bool:
@@ -108,7 +110,7 @@ class TranscriptionService:
 
                     async with aiohttp.ClientSession(timeout=timeout) as session:
                         async with session.post(
-                            OPENAI_TRANSCRIPTIONS_URL,
+                            self._transcriptions_url,
                             data=form,
                             headers=headers,
                         ) as resp:

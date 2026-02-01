@@ -71,6 +71,7 @@ class OpenAIAudioConfig:
 
 @dataclass(slots=True)
 class OpenAIConfig:
+    base_url: str = "https://api.openai.com"
     audio: OpenAIAudioConfig
 
 
@@ -231,6 +232,9 @@ def _apply_env_overrides(config: AppConfig) -> AppConfig:
     codex_exec = os.getenv("CODEX_EXEC_PATH")
     if codex_exec:
         config.codex.exec_path = codex_exec
+    openai_base_url = os.getenv("OPENAI_BASE_URL")
+    if openai_base_url:
+        config.openai.base_url = openai_base_url
 
     db_path = os.getenv("JARVIS_DB_PATH")
     if db_path:
@@ -286,7 +290,10 @@ def _parse_openai(raw: Any) -> OpenAIConfig:
         max_retries=int(audio_raw.get("max_retries", 2)),
         retry_backoff_seconds=float(audio_raw.get("retry_backoff_seconds", 0.5)),
     )
-    return OpenAIConfig(audio=audio_config)
+    return OpenAIConfig(
+        base_url=str(raw.get("base_url", "https://api.openai.com")),
+        audio=audio_config,
+    )
 
 
 def _parse_triggers(raw: Any) -> TriggersConfig:

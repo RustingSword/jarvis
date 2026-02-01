@@ -43,6 +43,7 @@ class JarvisApp:
         self._transcriber = TranscriptionService(
             config.openai.audio,
             os.getenv("OPENAI_API_KEY"),
+            config.openai.base_url,
         )
         self._telegram = TelegramBot(config.telegram, self._event_bus)
         self._triggers = TriggerManager(self._event_bus, config.triggers)
