@@ -4,6 +4,7 @@ __pycache__/
 memory/
 MEMORY.md
 AGENTS.md
+config.yaml
 *.egg-info/
 .env
 
