@@ -9,5 +9,4 @@ config.yaml
 .env
 
 # Local artifacts
-chat.png
-jarvis.pid
+.jarvis.pid
