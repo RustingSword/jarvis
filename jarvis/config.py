@@ -72,7 +72,7 @@ class OpenAIAudioConfig:
 @dataclass(slots=True)
 class OpenAIConfig:
     base_url: str = "https://api.openai.com"
-    audio: OpenAIAudioConfig
+    audio: OpenAIAudioConfig = field(default_factory=OpenAIAudioConfig)
 
 
 @dataclass(slots=True)
