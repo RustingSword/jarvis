@@ -71,6 +71,7 @@ class MessagePipeline:
                 verbosity_override = str(raw_override)
 
         progress_state = {"session_id": None, "thread_id": None}
+        start_notified = False
         if message_session:
             progress_state["session_id"] = message_session.session_id
             progress_state["thread_id"] = message_session.thread_id
@@ -79,6 +80,7 @@ class MessagePipeline:
             progress_state["thread_id"] = active_session.thread_id
 
         async def progress_callback(codex_event: dict) -> None:
+            nonlocal start_notified
             if codex_event.get("type") == "thread.started":
                 thread_id = codex_event.get("thread_id")
                 if thread_id:
@@ -89,6 +91,22 @@ class MessagePipeline:
                     )
                     progress_state["session_id"] = record.session_id
                     progress_state["thread_id"] = record.thread_id
+                    if is_trigger and not start_notified:
+                        start_notified = True
+                        content = text.strip() or "(无内容)"
+                        await self._messenger.send_markdown(
+                            chat_id,
+                            "\n".join(
+                                [
+                                    "触发任务已启动。",
+                                    f"会话: `{record.session_id}`",
+                                    f"内容: {content}",
+                                ]
+                            ),
+                            with_session_prefix=False,
+                            session_id=record.session_id,
+                            thread_id=record.thread_id,
+                        )
             await self._progress.handle(
                 chat_id,
                 codex_event,
