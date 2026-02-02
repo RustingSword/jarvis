@@ -33,5 +33,14 @@ def normalize_verbosity(value: str | None) -> str | None:
         "简洁": "compact",
         "简短": "compact",
         "安静": "compact",
+        "result": "result",
+        "final": "result",
+        "output": "result",
+        "results": "result",
+        "only": "result",
+        "结果": "result",
+        "最终": "result",
+        "仅结果": "result",
+        "只结果": "result",
     }
     return aliases.get(raw)

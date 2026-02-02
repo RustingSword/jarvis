@@ -20,8 +20,11 @@ class VerbosityManager:
     def get(self, chat_id: str) -> str:
         return self._by_chat.get(chat_id, self._default)
 
-    def show_tool_messages(self, chat_id: str) -> bool:
-        return self.get(chat_id) not in {"compact", "minimal"}
+    def show_tool_messages(self, chat_id: str, override: str | None = None) -> bool:
+        return self._resolve(chat_id, override) == "full"
+
+    def show_reasoning_messages(self, chat_id: str, override: str | None = None) -> bool:
+        return self._resolve(chat_id, override) in {"full", "compact"}
 
     async def set(self, chat_id: str, value: str) -> str:
         normalized = normalize_verbosity(value)
@@ -38,3 +41,10 @@ class VerbosityManager:
     @property
     def default(self) -> str:
         return self._default
+
+    def _resolve(self, chat_id: str, override: str | None) -> str:
+        if override:
+            normalized = normalize_verbosity(override)
+            if normalized:
+                return normalized
+        return self.get(chat_id)

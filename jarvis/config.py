@@ -14,6 +14,7 @@ class SchedulerJobConfig:
     cron: str
     chat_id: str | None = None
     message: str | None = None
+    verbosity: str | None = None
 
 
 @dataclass(slots=True)
@@ -309,6 +310,7 @@ def _parse_triggers(raw: Any) -> TriggersConfig:
             cron=str(job.get("cron", "")),
             chat_id=_optional_str(job.get("chat_id")),
             message=_optional_str(job.get("message")),
+            verbosity=_optional_str(job.get("verbosity")),
         )
         for job in scheduler_raw
         if isinstance(job, dict)

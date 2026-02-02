@@ -89,7 +89,7 @@ sudo journalctl -u jarvis -f
 - `/reset` - 重置会话
 - `/compact` - 压缩会话上下文
 - `/skills` - 查看/安装/添加数据源（`/skills sources|list|installed|install|add-source`）
-- `/verbosity <full|compact|reset>` - 输出详细程度
+- `/verbosity <full|compact|result|reset>` - 输出详细程度
 
 ### 记忆功能
 - `/memory search <关键词>` | `/memory add <内容>` | `/memory get <path> [from] [lines]` | `/memory index` | `/memory status` - 记忆功能
@@ -129,13 +129,16 @@ logging:
   backup_count: 5
 
 output:
-  verbosity: "full"  # full: 输出工具调用与思考; compact: 仅输出思考和最终结果
+  verbosity: "full"  # full: 输出工具调用与思考; compact: 仅输出思考和最终结果; result: 仅输出最终结果
+
+# 定时任务默认使用 result，若需覆盖可在 scheduler 任务中设置 verbosity
 
 triggers:
   scheduler:
     - name: "daily_summary"
       cron: "0 9 * * *"  # 每天 9 点
       message: "每日提醒：记得规划今日安排。"
+      # verbosity: "result"  # 可选：覆盖该任务的输出详细程度
 
   monitors:
     - name: "cpu_alert"
@@ -179,7 +182,7 @@ WEBHOOK_PORT=8080
 JARVIS_LOG_LEVEL=INFO
 JARVIS_LOG_FILE=~/.jarvis/jarvis.log
 
-# 输出信息详细程度
+# 输出信息详细程度（full/compact/result）
 JARVIS_VERBOSITY=full
 ```
 

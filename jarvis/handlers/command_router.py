@@ -83,7 +83,7 @@ class CommandRouter:
                     "- `/reset` - 重置当前对话上下文",
                     "- `/compact` - 压缩对话历史并重置",
                     "- `/resume <id>` - 恢复历史会话（不带 id 会列出最近会话）",
-                    "- `/verbosity <full|compact|reset>` - 控制输出详细程度",
+                    "- `/verbosity <full|compact|result|reset>` - 控制输出详细程度",
                     (
                         "- `/skills sources` | `/skills list [source]` | `/skills installed` | "
                         "`/skills install <source> <name>` | "
@@ -182,7 +182,8 @@ class CommandRouter:
             current = self._verbosity.get(chat_id)
             await self._messenger.send_markdown(
                 chat_id,
-                f"**当前 verbosity**: `{current}`\n**用法**: `/verbosity full|compact|reset`",
+                f"**当前 verbosity**: `{current}`\n"
+                f"**用法**: `/verbosity full|compact|result|reset`",
             )
             return
 
@@ -199,7 +200,7 @@ class CommandRouter:
             normalized = await self._verbosity.set(chat_id, args[0])
         except ValueError:
             await self._messenger.send_markdown(
-                chat_id, "**用法**: `/verbosity full|compact|reset`"
+                chat_id, "**用法**: `/verbosity full|compact|result|reset`"
             )
             return
 

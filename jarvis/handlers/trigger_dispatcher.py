@@ -5,6 +5,7 @@ from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 
 from jarvis.event_bus import Event
+from jarvis.formatting import normalize_verbosity
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +47,12 @@ class TriggerDispatcher:
     async def _handle_schedule(self, payload: dict) -> None:
         chat_id = payload.get("chat_id")
         message = payload.get("message") or f"计划触发: {payload.get('name')}"
-        await self._dispatch_to_codex(chat_id, str(message))
+        verbosity = None
+        raw_verbosity = payload.get("verbosity")
+        if raw_verbosity:
+            verbosity = normalize_verbosity(str(raw_verbosity))
+        verbosity = verbosity or "result"
+        await self._dispatch_to_codex(chat_id, str(message), verbosity=verbosity)
 
     async def _handle_webhook(self, payload: dict) -> None:
         webhook_payload = payload.get("payload")
@@ -56,7 +62,9 @@ class TriggerDispatcher:
             message = webhook_payload.get("message") or webhook_payload.get("text")
             await self._dispatch_to_codex(chat_id, str(message) if message else "")
 
-    async def _dispatch_to_codex(self, chat_id: str | None, message: str) -> None:
+    async def _dispatch_to_codex(
+        self, chat_id: str | None, message: str, *, verbosity: str | None = None
+    ) -> None:
         if not chat_id:
             logger.warning("Trigger missing chat_id, skipping: %s", message)
             return
@@ -65,7 +73,12 @@ class TriggerDispatcher:
             return
         event = Event(
             type="trigger.message",
-            payload={"chat_id": str(chat_id), "text": message, "source": "trigger"},
+            payload={
+                "chat_id": str(chat_id),
+                "text": message,
+                "source": "trigger",
+                "verbosity": verbosity,
+            },
             created_at=datetime.now(timezone.utc),
         )
         await self._enqueue_message(event)

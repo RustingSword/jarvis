@@ -46,15 +46,23 @@ class SchedulerTrigger:
                     "name": job.name,
                     "chat_id": job.chat_id,
                     "message": job.message,
+                    "verbosity": job.verbosity,
                 },
             )
             logger.info("Scheduled job '%s' with cron '%s'", job.name, job.cron)
 
-    async def _fire_job(self, name: str, chat_id: str | None, message: str | None) -> None:
+    async def _fire_job(
+        self,
+        name: str,
+        chat_id: str | None,
+        message: str | None,
+        verbosity: str | None,
+    ) -> None:
         payload = {
             "type": "schedule",
             "name": name,
             "chat_id": chat_id,
             "message": message,
+            "verbosity": verbosity,
         }
         await self._event_bus.publish(TRIGGER_FIRED, payload)

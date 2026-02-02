@@ -153,7 +153,7 @@ storage:
 ```
 
 ### 动态配置（通过命令）
-- `/verbosity <full|compact|reset>` - 输出详细程度
+- `/verbosity <full|compact|result|reset>` - 输出详细程度
 - `/skills ...` - 技能来源/安装管理
 - `/memory ...` - 记忆写入与检索
 

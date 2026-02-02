@@ -66,6 +66,12 @@ class MessagePipeline:
             (not is_trigger) and (message_session is None) and (active_session is None)
         )
 
+        verbosity_override = None
+        if is_trigger:
+            raw_override = event.payload.get("verbosity")
+            if raw_override:
+                verbosity_override = str(raw_override)
+
         progress_state = {"session_id": None, "thread_id": None}
         if message_session:
             progress_state["session_id"] = message_session.session_id
@@ -89,6 +95,7 @@ class MessagePipeline:
                 chat_id,
                 codex_event,
                 session_id=progress_state.get("session_id"),
+                verbosity_override=verbosity_override,
             )
 
         try:
