@@ -10,7 +10,7 @@ Jarvis 是一个基于 Codex SDK 的 Telegram 个人助理 Agent，实现了长�
 ✅ **事件驱动架构**：中央事件总线协调所有组件
 ✅ **Telegram Bot 集成**：消息收发、命令处理
 ✅ **Codex CLI 封装**：会话管理、JSONL 解析、重试机制
-✅ **会话管理**：独立会话、/reset、/compact
+✅ **会话管理**：独立会话、/new、/compact
 ✅ **数据持久化**：SQLite + 文件存储
 
 ### 高级功能
@@ -109,7 +109,7 @@ jarvis/
 
 ### Telegram Bot Manager
 - 基于 python-telegram-bot
-- 命令路由（/start、/help、/reset、/compact）
+- 命令路由（/start、/help、/new、/compact）
 - 消息过滤
 - 事件发布
 

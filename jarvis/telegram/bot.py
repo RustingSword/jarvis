@@ -32,7 +32,6 @@ COMMAND_SPECS = (
     ("start", "开始使用 Jarvis"),
     ("help", "显示帮助信息"),
     ("new", "新建会话"),
-    ("reset", "重置对话上下文"),
     ("compact", "压缩对话历史"),
     ("resume", "恢复历史会话"),
     ("verbosity", "设置输出详细程度"),

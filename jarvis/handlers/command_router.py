@@ -46,7 +46,6 @@ class CommandRouter:
             "start": self._cmd_start,
             "help": self._cmd_help,
             "new": self._cmd_new,
-            "reset": self._cmd_reset,
             "compact": self._cmd_compact,
             "resume": self._cmd_resume,
             "verbosity": self._cmd_verbosity,
@@ -79,7 +78,6 @@ class CommandRouter:
                     "- `/start` - 开始对话",
                     "- `/help` - 显示帮助",
                     "- `/new [任务]` - 新建会话（可直接跟任务并执行）",
-                    "- `/reset` - 重置当前对话上下文",
                     "- `/compact` - 压缩对话历史并重置",
                     "- `/resume <id>` - 恢复历史会话（不带 id 会列出最近会话）",
                     "- `/verbosity <full|compact|result|reset>` - 控制输出详细程度",
@@ -145,10 +143,6 @@ class CommandRouter:
             session_id=session_record.session_id if session_record else None,
             thread_id=session_record.thread_id if session_record else None,
         )
-
-    async def _cmd_reset(self, chat_id: str, args: list[str]) -> None:
-        await self._storage.clear_session(chat_id)
-        await self._messenger.send_markdown(chat_id, "会话已重置。")
 
     async def _cmd_compact(self, chat_id: str, args: list[str]) -> None:
         await self._handle_compact(chat_id)
@@ -222,7 +216,7 @@ class CommandRouter:
         except CodexProcessError as exc:
             error_msg = str(exc)
             if "UTF-8" in error_msg:
-                error_msg = f"会话文件可能已损坏。建议使用 `/reset` 重置会话。\n技术详情: {exc}"
+                error_msg = f"会话文件可能已损坏。建议使用 `/new` 创建新会话。\n技术详情: {exc}"
             await self._messenger.send_markdown(chat_id, f"会话压缩失败: {error_msg}")
             return
 

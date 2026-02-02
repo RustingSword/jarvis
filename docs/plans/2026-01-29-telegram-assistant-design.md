@@ -10,7 +10,7 @@
 - **综合助理功能**：信息查询、系统监控、记忆管理
 - **混合触发方式**：时间触发、系统事件、外部 API
 - **双向通信**：被动响应 + 主动推送
-- **会话管理**：类似 clawdbot 的 session 管理（独立上下文、/reset、/compact）
+- **会话管理**：类似 clawdbot 的 session 管理（独立上下文、/new、/compact）
 
 ### 技术需求
 - **部署方式**：本地服务器/VPS，systemd 服务
@@ -82,7 +82,7 @@
 - 监听发送消息事件并执行
 
 **关键功能：**
-- 命令处理（/start, /reset, /compact, /help 等）
+- 命令处理（/start, /new, /compact, /help 等）
 - 消息路由（普通消息 vs 命令）
 - 错误处理和重试机制
 
@@ -97,7 +97,7 @@
 - 使用 asyncio.create_subprocess_exec 调用 codex CLI
 - 每个 Telegram chat_id 对应一个 Codex session
 - Session ID 从 Codex 输出中提取并持久化
-- 支持 /reset 清空 session
+- 支持 /new 创建新会话并清空 session
 
 **注意：Codex 没有官方 Python SDK，使用 CLI wrapper 方式**
 

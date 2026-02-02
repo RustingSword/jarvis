@@ -86,7 +86,7 @@ sudo journalctl -u jarvis -f
 ### 基础命令
 - `/start` - 开始对话
 - `/help` - 查看帮助
-- `/reset` - 重置会话
+- `/new [任务]` - 新建会话（可直接跟任务并执行）
 - `/compact` - 压缩会话上下文
 - `/skills` - 查看/安装/添加数据源（`/skills sources|list|installed|install|add-source`）
 - `/verbosity <full|compact|result|reset>` - 输出详细程度
