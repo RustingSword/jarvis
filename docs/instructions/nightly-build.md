@@ -5,7 +5,7 @@ Purpose: deliver one low-risk improvement or a clear report during the nightly w
 Read-first
 - Read MEMORY.md.
 - If a recent daily note exists under memory/, skim the latest one.
-- Check ~/.jarvis/jarvis.log (last ~200 lines) for errors or warnings.
+- Check ~/.jarvis/jarvis.log (last ~200 lines, more if needed) for errors or warnings.
 
 Scope rules
 - Do NOT modify config files or secrets.
@@ -15,7 +15,7 @@ Scope rules
 
 Allowed outputs
 - A concise Nightly Report in chat.
-- Optionally write a report file under docs/nightly-build/YYYY-MM-DD.md.
+- Optionally write a report file under reports/nightly-build/YYYY-MM-DD.md.
 
 Nightly Report template
 - Task (or No-op)
