@@ -1,14 +1,20 @@
 from __future__ import annotations
 
+from pathlib import Path
+
+from jarvis.audio.tts import TTSService
 from jarvis.event_bus import EventBus
 from jarvis.events import TELEGRAM_SEND
 from jarvis.storage import Storage
 
 
 class Messenger:
-    def __init__(self, event_bus: EventBus, storage: Storage) -> None:
+    def __init__(
+        self, event_bus: EventBus, storage: Storage, tts: TTSService | None = None
+    ) -> None:
         self._event_bus = event_bus
         self._storage = storage
+        self._tts = tts
 
     async def send_message(
         self,
@@ -21,6 +27,8 @@ class Messenger:
         with_session_prefix: bool = True,
         session_id: int | None = None,
         thread_id: str | None = None,
+        tts_hint: bool = False,
+        tts_text: str | None = None,
     ) -> None:
         final_text = text
         if with_session_prefix:
@@ -43,16 +51,19 @@ class Messenger:
         if parse_mode:
             payload["parse_mode"] = parse_mode
         await self._event_bus.publish(TELEGRAM_SEND, payload)
+        await self._maybe_send_tts(chat_id, tts_text, meta, tts_hint)
 
     async def send_markdown(
         self,
         chat_id: str,
-        text: str,
+        text: str | None,
         *,
         with_separator: bool = True,
         with_session_prefix: bool = True,
         session_id: int | None = None,
         thread_id: str | None = None,
+        tts_hint: bool = False,
+        tts_text: str | None = None,
     ) -> None:
         await self.send_message(
             chat_id,
@@ -62,6 +73,8 @@ class Messenger:
             with_session_prefix=with_session_prefix,
             session_id=session_id,
             thread_id=thread_id,
+            tts_hint=tts_hint,
+            tts_text=tts_text,
         )
 
     async def send_media(
@@ -112,3 +125,37 @@ class Messenger:
         if with_separator:
             return f"{prefix}\n\n------\n\n{text}"
         return f"{prefix}\n\n{text}"
+
+    async def _maybe_send_tts(
+        self,
+        chat_id: str,
+        text: str,
+        meta: dict[str, object],
+        tts_hint: bool,
+    ) -> None:
+        if not tts_hint:
+            return
+        if not self._tts or not self._tts.enabled:
+            return
+        if not text:
+            return
+        tts_text = text.strip()
+        if not tts_text:
+            return
+        path = await self._tts.synthesize(tts_text)
+        if not path:
+            return
+        payload: dict[str, object] = {
+            "chat_id": chat_id,
+            "media": [{"type": _tts_media_type(path), "path": path}],
+        }
+        if meta:
+            payload["meta"] = meta
+        await self._event_bus.publish(TELEGRAM_SEND, payload)
+
+
+def _tts_media_type(path: str) -> str:
+    ext = Path(path).suffix.lower()
+    if ext in {".ogg", ".opus"}:
+        return "voice"
+    return "audio"

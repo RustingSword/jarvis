@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from jarvis.audio.transcriber import TranscriptionService
+from jarvis.audio.tts import TTSService
 from jarvis.codex import CodexManager
 from jarvis.config import AppConfig
 from jarvis.event_bus import EventBus
@@ -47,10 +48,11 @@ class JarvisApp:
             os.getenv("OPENAI_API_KEY"),
             config.openai.base_url,
         )
+        self._tts = TTSService(config.tts, config.telegram.media_dir)
         self._telegram = TelegramBot(config.telegram, self._event_bus)
         self._triggers = TriggerManager(self._event_bus, config.triggers)
 
-        self._messenger = Messenger(self._event_bus, self._storage)
+        self._messenger = Messenger(self._event_bus, self._storage, tts=self._tts)
         self._verbosity = VerbosityManager(self._storage, config.output.verbosity)
         self._progress = CodexProgressHandler(self._messenger, self._storage, self._verbosity)
         self._message_sent_handler = MessageSentHandler(self._storage)

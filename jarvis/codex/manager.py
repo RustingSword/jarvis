@@ -21,6 +21,7 @@ class CodexResult:
     response_text: str
     events: List[dict[str, Any]]
     media: List[dict[str, Any]]
+    tts_text: Optional[str] = None
 
 
 class CodexError(RuntimeError):
@@ -118,12 +119,18 @@ class CodexManager:
         else:
             logger.info("No media items extracted from response.")
         response_text = _strip_media_markers(response_text)
+        tts_text = _extract_tts_text(response_text)
+        response_text = _strip_tts_segments(response_text)
 
         if proc.returncode != 0:
             raise CodexProcessError(f"Codex exited with code {proc.returncode}: {stderr_text}")
 
         return CodexResult(
-            thread_id=thread_id, response_text=response_text, events=events, media=media
+            thread_id=thread_id,
+            response_text=response_text,
+            events=events,
+            media=media,
+            tts_text=tts_text,
         )
 
     async def _read_stdout_with_callback(
@@ -277,6 +284,7 @@ def _coerce_text(value: Any) -> str:
 _MEDIA_EXT_PHOTO = {"png", "jpg", "jpeg", "gif", "webp"}
 _MEDIA_SCHEME = "send_to_user://"
 _MEDIA_MARKER_RE = re.compile(r"send_to_user://(?P<path>[^\s`'\"<>]+)", re.IGNORECASE)
+_TTS_TAG_RE = re.compile(r"(?is)<tts>(.*?)</tts>")
 
 
 def _extract_media(
@@ -360,6 +368,25 @@ def _strip_media_markers(text: str) -> str:
     if not text:
         return text
     cleaned = _MEDIA_MARKER_RE.sub("", text)
+    cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    return cleaned.strip()
+
+
+def _extract_tts_text(text: str) -> str | None:
+    if not text:
+        return None
+    segments = [match.strip() for match in _TTS_TAG_RE.findall(text)]
+    segments = [segment for segment in segments if segment]
+    if not segments:
+        return None
+    return "\n".join(segments)
+
+
+def _strip_tts_segments(text: str) -> str:
+    if not text:
+        return text
+    cleaned = _TTS_TAG_RE.sub("", text)
     cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
     return cleaned.strip()

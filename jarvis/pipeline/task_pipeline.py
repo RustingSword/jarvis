@@ -109,4 +109,6 @@ class TaskPipeline:
             response_text,
             session_id=session_id,
             thread_id=thread_id,
+            tts_hint=bool(result.tts_text),
+            tts_text=result.tts_text,
         )

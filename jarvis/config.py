@@ -77,6 +77,18 @@ class OpenAIConfig:
 
 
 @dataclass(slots=True)
+class TTSConfig:
+    enabled: bool = True
+    voice: str = "zh-CN-XiaoxiaoNeural"
+    rate: str = "+0%"
+    pitch: str = "+0Hz"
+    timeout_seconds: int = 30
+    max_retries: int = 1
+    retry_backoff_seconds: float = 0.5
+    output_dir: str | None = None
+
+
+@dataclass(slots=True)
 class StorageConfig:
     db_path: str
     session_dir: str
@@ -133,6 +145,7 @@ class AppConfig:
     telegram: TelegramConfig
     codex: CodexConfig
     openai: OpenAIConfig
+    tts: TTSConfig
     storage: StorageConfig
     memory: MemoryConfig
     logging: LoggingConfig
@@ -162,6 +175,7 @@ def load_config(path: str | Path) -> AppConfig:
     telegram_raw = _require(data, "telegram")
     codex_raw = _require(data, "codex")
     openai_raw = data.get("openai", {}) or {}
+    tts_raw = data.get("tts", {}) or {}
     storage_raw = _require(data, "storage")
     memory_raw = data.get("memory", {}) or {}
     logging_raw = data.get("logging", {})
@@ -187,6 +201,7 @@ def load_config(path: str | Path) -> AppConfig:
             retry_backoff_seconds=float(codex_raw.get("retry_backoff_seconds", 0.5)),
         ),
         openai=_parse_openai(openai_raw),
+        tts=_parse_tts(tts_raw),
         storage=StorageConfig(
             db_path=_require(storage_raw, "db_path"),
             session_dir=_require(storage_raw, "session_dir"),
@@ -294,6 +309,21 @@ def _parse_openai(raw: Any) -> OpenAIConfig:
     return OpenAIConfig(
         base_url=str(raw.get("base_url", "https://api.openai.com")),
         audio=audio_config,
+    )
+
+
+def _parse_tts(raw: Any) -> TTSConfig:
+    if not isinstance(raw, dict):
+        raw = {}
+    return TTSConfig(
+        enabled=bool(raw.get("enabled", True)),
+        voice=str(raw.get("voice", "zh-CN-XiaoxiaoNeural")),
+        rate=str(raw.get("rate", "+0%")),
+        pitch=str(raw.get("pitch", "+0Hz")),
+        timeout_seconds=int(raw.get("timeout_seconds", 30)),
+        max_retries=int(raw.get("max_retries", 1)),
+        retry_backoff_seconds=float(raw.get("retry_backoff_seconds", 0.5)),
+        output_dir=_optional_str(raw.get("output_dir")),
     )
 
 

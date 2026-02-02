@@ -20,6 +20,16 @@ openai:
     max_retries: 2
     retry_backoff_seconds: 0.5
 
+tts:
+  enabled: true
+  voice: "zh-CN-XiaoxiaoNeural"
+  rate: "+0%"
+  pitch: "+0Hz"
+  timeout_seconds: 30
+  max_retries: 1
+  retry_backoff_seconds: 0.5
+  # output_dir: "~/.jarvis/telegram_media"
+
 storage:
   db_path: "~/.jarvis/jarvis.db"
   session_dir: "~/.jarvis/sessions"

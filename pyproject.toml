@@ -20,6 +20,7 @@ dependencies = [
   "telegramify-markdown>=0.5.4",
   "python-dotenv>=1.2.1",
   "loguru>=0.7.3",
+  "edge-tts>=7.2.7",
 ]
 
 [project.scripts]

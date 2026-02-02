@@ -18,7 +18,10 @@ class PromptBuilder:
                 prompt = f"{prompt}\n\n{attachments_text}"
             else:
                 prompt = f"用户未提供文本，仅提供了附件。\n\n{attachments_text}"
-        return prompt or base_text
+        final_prompt = prompt or base_text
+        if final_prompt:
+            return f"{_tts_guidance()}\n\n{final_prompt}"
+        return _tts_guidance()
 
     async def _augment_with_memory(self, text: str) -> str:
         if not self._memory.enabled:
@@ -58,3 +61,11 @@ class PromptBuilder:
             meta = f" ({' / '.join(meta_parts)})" if meta_parts else ""
             lines.append(f"{idx}. {path}{meta}")
         return "\n".join(lines)
+
+
+def _tts_guidance() -> str:
+    return (
+        "系统提示：如需语音播报，请将要播报的部分用 `<tts>...</tts>` 包裹，"
+        "系统会提取该内容生成语音并从文本回复中移除，不要向用户解释该标签。"
+        "若为故事类回复，请将完整故事置于 `<tts>...</tts>` 中。"
+    )

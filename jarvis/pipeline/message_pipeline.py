@@ -165,4 +165,6 @@ class MessagePipeline:
             with_session_prefix=not is_trigger,
             session_id=session_id_for_response,
             thread_id=thread_id_for_response,
+            tts_hint=bool(result.tts_text),
+            tts_text=result.tts_text,
         )
