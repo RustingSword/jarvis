@@ -1,14 +1,11 @@
 from __future__ import annotations
 
 import json
-import logging
 
 from jarvis.formatting import as_blockquote, format_code_block, format_tool_path
 from jarvis.messaging.messenger import Messenger
 from jarvis.storage import Storage
 from jarvis.verbosity import VerbosityManager
-
-logger = logging.getLogger(__name__)
 
 _TOOL_USE_NAME_MAP = {
     "bash": "执行命令",

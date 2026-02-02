@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-import logging
+from loguru import logger
 
 from jarvis.event_bus import Event
 from jarvis.storage import Storage
-
-logger = logging.getLogger(__name__)
 
 
 class MessageSentHandler:

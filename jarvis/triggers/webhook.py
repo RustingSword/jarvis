@@ -1,16 +1,14 @@
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass, field
 from typing import Any
 
 from aiohttp import web
+from loguru import logger
 
 from jarvis.config import WebhookConfig
 from jarvis.event_bus import EventBus
 from jarvis.events import TRIGGER_FIRED
-
-logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -30,7 +28,7 @@ class WebhookServer:
         await self._runner.setup()
         self._site = web.TCPSite(self._runner, self.config.host, self.config.port)
         await self._site.start()
-        logger.info("Webhook server listening on %s:%s", self.config.host, self.config.port)
+        logger.info("Webhook server listening on {}:{}", self.config.host, self.config.port)
 
     async def stop(self) -> None:
         if self._runner:

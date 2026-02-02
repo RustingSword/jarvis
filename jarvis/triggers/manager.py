@@ -1,14 +1,12 @@
 from __future__ import annotations
 
-import logging
+from loguru import logger
 
 from jarvis.config import TriggersConfig
 from jarvis.event_bus import EventBus
 from jarvis.triggers.monitor import MonitorTrigger
 from jarvis.triggers.scheduler import SchedulerTrigger
 from jarvis.triggers.webhook import WebhookServer
-
-logger = logging.getLogger(__name__)
 
 
 class TriggerManager:

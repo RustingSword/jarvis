@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 from collections.abc import Awaitable, Callable
 
-from jarvis.event_bus import Event
+from loguru import logger
 
-logger = logging.getLogger(__name__)
+from jarvis.event_bus import Event
 
 EventHandler = Callable[[Event], Awaitable[None]]
 

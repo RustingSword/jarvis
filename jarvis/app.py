@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 import os
 
 from dotenv import load_dotenv
+from loguru import logger
 
 from jarvis.audio.transcriber import TranscriptionService
 from jarvis.codex import CodexManager
@@ -33,8 +33,6 @@ from jarvis.verbosity import VerbosityManager
 from jarvis.workers import QueueWorker
 
 load_dotenv()
-
-logger = logging.getLogger(__name__)
 
 
 class JarvisApp:

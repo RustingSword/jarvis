@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -10,8 +9,6 @@ from uuid import uuid4
 import aiosqlite
 
 from jarvis.config import StorageConfig
-
-logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)

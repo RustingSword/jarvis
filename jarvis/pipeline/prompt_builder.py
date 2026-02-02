@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-import logging
+from loguru import logger
 
 from jarvis.memory import MemoryManager
-
-logger = logging.getLogger(__name__)
 
 
 class PromptBuilder:

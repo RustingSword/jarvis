@@ -1,16 +1,14 @@
 from __future__ import annotations
 
-import logging
 from datetime import datetime, timezone
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
+from loguru import logger
 
 from jarvis.config import SchedulerJobConfig
 from jarvis.event_bus import EventBus
 from jarvis.events import TRIGGER_FIRED
-
-logger = logging.getLogger(__name__)
 
 
 class SchedulerTrigger:
@@ -35,7 +33,7 @@ class SchedulerTrigger:
             try:
                 trigger = CronTrigger.from_crontab(job.cron, timezone=self._timezone)
             except Exception:
-                logger.exception("Invalid cron expression for job '%s': %s", job.name, job.cron)
+                logger.exception("Invalid cron expression for job '{}': {}", job.name, job.cron)
                 continue
             self._scheduler.add_job(
                 self._fire_job,
@@ -49,7 +47,7 @@ class SchedulerTrigger:
                     "verbosity": job.verbosity,
                 },
             )
-            logger.info("Scheduled job '%s' with cron '%s'", job.name, job.cron)
+            logger.info("Scheduled job '{}' with cron '{}'", job.name, job.cron)
 
     async def _fire_job(
         self,

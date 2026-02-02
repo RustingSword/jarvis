@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import json
-import logging
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta, timezone
+
+from loguru import logger
 
 from jarvis.codex import CodexError, CodexManager, CodexProcessError, CodexTimeoutError
 from jarvis.config import SkillsConfig, SkillSourceConfig, persist_skill_source
@@ -15,8 +16,6 @@ from jarvis.pipeline.prompt_builder import PromptBuilder
 from jarvis.skills import SkillError, install_skill, list_installed_skills, list_remote_skills
 from jarvis.storage import Storage
 from jarvis.verbosity import VerbosityManager
-
-logger = logging.getLogger(__name__)
 
 EventEnqueuer = Callable[[Event], Awaitable[None]]
 

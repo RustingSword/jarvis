@@ -1,17 +1,15 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 import os
 from dataclasses import dataclass
 
 import psutil
+from loguru import logger
 
 from jarvis.config import MonitorConfig
 from jarvis.event_bus import EventBus
 from jarvis.events import TRIGGER_FIRED
-
-logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -31,7 +29,7 @@ class MonitorTrigger:
         self._states = [MonitorState(config=m) for m in monitors if m.enabled]
         for state in self._states:
             state.task = asyncio.create_task(self._monitor_loop(state.config))
-        logger.info("Monitor trigger started with %d monitors", len(self._states))
+        logger.info("Monitor trigger started with {} monitors", len(self._states))
 
     async def stop(self) -> None:
         self._running = False
@@ -58,7 +56,7 @@ class MonitorTrigger:
                     }
                     await self._event_bus.publish(TRIGGER_FIRED, payload)
             except Exception:
-                logger.exception("Monitor '%s' failed", config.name)
+                logger.exception("Monitor '{}' failed", config.name)
             await asyncio.sleep(config.interval_seconds)
 
 
@@ -73,5 +71,5 @@ def _read_metric(metric_type: str) -> float | None:
     if metric == "load":
         load1, _, _ = os.getloadavg()
         return load1
-    logger.warning("Unknown monitor metric: %s", metric_type)
+    logger.warning("Unknown monitor metric: {}", metric_type)
     return None

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import logging
+from loguru import logger
 
 from jarvis.audio.transcriber import TranscriptionService
 from jarvis.codex import CodexManager, CodexProcessError, CodexTimeoutError
@@ -10,8 +10,6 @@ from jarvis.messaging.messenger import Messenger
 from jarvis.pipeline.prompt_builder import PromptBuilder
 from jarvis.storage import Storage
 from jarvis.verbosity import VerbosityManager
-
-logger = logging.getLogger(__name__)
 
 
 class MessagePipeline:

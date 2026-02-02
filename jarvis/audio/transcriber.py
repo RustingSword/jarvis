@@ -1,15 +1,13 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 from pathlib import Path
 from typing import Iterable
 
 import aiohttp
+from loguru import logger
 
 from jarvis.config import OpenAIAudioConfig
-
-logger = logging.getLogger(__name__)
 
 DEFAULT_OPENAI_BASE_URL = "https://api.openai.com"
 SUPPORTED_AUDIO_TYPES = {"audio", "voice"}
@@ -89,7 +87,7 @@ class TranscriptionService:
 
         file_path = Path(path)
         if not file_path.exists():
-            logger.warning("Audio file not found for transcription: %s", file_path)
+            logger.warning("Audio file not found for transcription: {}", file_path)
             return None
 
         file_size = file_path.stat().st_size
@@ -167,7 +165,7 @@ class TranscriptionService:
                 return None
 
         if last_error:
-            logger.warning("Transcription failed: %s", last_error)
+            logger.warning("Transcription failed: {}", last_error)
         return None
 
     async def _parse_transcription_response(self, resp: aiohttp.ClientResponse) -> str | None:

@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-import logging
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 
+from loguru import logger
+
 from jarvis.event_bus import Event
 from jarvis.formatting import normalize_verbosity
-
-logger = logging.getLogger(__name__)
 
 EventEnqueuer = Callable[[Event], Awaitable[None]]
 
@@ -20,7 +19,7 @@ class TriggerDispatcher:
         payload = event.payload
         trigger_type = payload.get("type")
         if not trigger_type:
-            logger.debug("Trigger missing type: %s", payload)
+            logger.debug("Trigger missing type: {}", payload)
             return
 
         if trigger_type == "monitor":
@@ -33,7 +32,7 @@ class TriggerDispatcher:
             await self._handle_webhook(payload)
             return
 
-        logger.debug("Unhandled trigger: %s", payload)
+        logger.debug("Unhandled trigger: {}", payload)
 
     async def _handle_monitor(self, payload: dict) -> None:
         chat_id = payload.get("chat_id")
@@ -56,7 +55,7 @@ class TriggerDispatcher:
 
     async def _handle_webhook(self, payload: dict) -> None:
         webhook_payload = payload.get("payload")
-        logger.info("Webhook fired: %s", webhook_payload)
+        logger.info("Webhook fired: {}", webhook_payload)
         if isinstance(webhook_payload, dict):
             chat_id = webhook_payload.get("chat_id")
             message = webhook_payload.get("message") or webhook_payload.get("text")
@@ -66,10 +65,10 @@ class TriggerDispatcher:
         self, chat_id: str | None, message: str, *, verbosity: str | None = None
     ) -> None:
         if not chat_id:
-            logger.warning("Trigger missing chat_id, skipping: %s", message)
+            logger.warning("Trigger missing chat_id, skipping: {}", message)
             return
         if not message:
-            logger.warning("Trigger missing message for chat_id=%s", chat_id)
+            logger.warning("Trigger missing message for chat_id={}", chat_id)
             return
         event = Event(
             type="trigger.message",

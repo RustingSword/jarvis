@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import functools
-import logging
 import re
 from pathlib import Path
 from typing import Any
 
 import telegramify_markdown
+from loguru import logger
 from telegram import BotCommand, Update
 from telegram.constants import ParseMode
 from telegram.error import BadRequest
@@ -27,8 +27,6 @@ from jarvis.events import (
     TELEGRAM_MESSAGE_SENT,
     TELEGRAM_SEND,
 )
-
-logger = logging.getLogger(__name__)
 
 COMMAND_SPECS = (
     ("start", "开始使用 Jarvis"),
@@ -155,7 +153,7 @@ class TelegramBot:
                 await self._send_text_chunks(chat_id, send_text, send_parse_mode, meta)
             except BadRequest as exc:
                 if _is_chat_not_found_error(exc):
-                    logger.warning("Telegram chat not found (chat_id=%s); drop message.", chat_id)
+                    logger.warning("Telegram chat not found (chat_id={}); drop message.", chat_id)
                     return
                 if send_parse_mode:
                     logger.warning(
@@ -174,7 +172,7 @@ class TelegramBot:
                     raise
         if media_items:
             if not text:
-                logger.info("Sending media-only payload to chat_id=%s", chat_id)
+                logger.info("Sending media-only payload to chat_id={}", chat_id)
             await self._send_media_items(chat_id, media_items, event.payload)
 
     async def _send_text_chunks(
@@ -301,7 +299,7 @@ class TelegramBot:
             file_obj = await media.get_file()
             local_path = await self._save_file(file_obj, kind=kind, filename_hint=filename_hint)
         except Exception:
-            logger.exception("Failed to download telegram media (%s)", kind)
+            logger.exception("Failed to download telegram media ({})", kind)
             return None
 
         file_id = getattr(media, "file_id", None)
@@ -342,29 +340,29 @@ class TelegramBot:
         try:
             self._media_dir.mkdir(parents=True, exist_ok=True)
         except Exception:
-            logger.exception("Failed to create media dir: %s", self._media_dir)
+            logger.exception("Failed to create media dir: {}", self._media_dir)
 
     async def _send_media_items(
         self, chat_id: str, media_items: list[dict[str, Any]], payload: dict
     ) -> None:
         if not self._is_app_ready():
             return
-        logger.info("Preparing to send %d media item(s) to chat_id=%s", len(media_items), chat_id)
+        logger.info("Preparing to send {} media item(s) to chat_id={}", len(media_items), chat_id)
         for item in media_items:
             path = item.get("path") or item.get("file")
             if not path:
-                logger.warning("Media item missing path: %s", item)
+                logger.warning("Media item missing path: {}", item)
                 continue
             kind = (item.get("type") or "document").lower()
             caption = item.get("caption")
             parse_mode = item.get("parse_mode")
             try:
-                logger.info("Sending media: type=%s path=%s", kind, path)
+                logger.info("Sending media: type={} path={}", kind, path)
                 await self._send_single_media(
                     chat_id, kind, path, caption=caption, parse_mode=parse_mode
                 )
             except Exception:
-                logger.exception("Failed to send media: %s", path)
+                logger.exception("Failed to send media: {}", path)
 
     async def _send_single_media(
         self,
@@ -379,7 +377,7 @@ class TelegramBot:
             return
         file_path = Path(path)
         if not file_path.exists():
-            logger.warning("Media file not found: %s", file_path)
+            logger.warning("Media file not found: {}", file_path)
             return
         try:
             if kind == "photo":
@@ -389,7 +387,7 @@ class TelegramBot:
                     caption=caption,
                     parse_mode=parse_mode,
                 )
-                logger.info("Media sent (photo): path=%s message_id=%s", file_path, sent.message_id)
+                logger.info("Media sent (photo): path={} message_id={}", file_path, sent.message_id)
                 return
             if kind == "video":
                 sent = await self._app.bot.send_video(
@@ -398,7 +396,7 @@ class TelegramBot:
                     caption=caption,
                     parse_mode=parse_mode,
                 )
-                logger.info("Media sent (video): path=%s message_id=%s", file_path, sent.message_id)
+                logger.info("Media sent (video): path={} message_id={}", file_path, sent.message_id)
                 return
             if kind == "audio":
                 sent = await self._app.bot.send_audio(
@@ -407,7 +405,7 @@ class TelegramBot:
                     caption=caption,
                     parse_mode=parse_mode,
                 )
-                logger.info("Media sent (audio): path=%s message_id=%s", file_path, sent.message_id)
+                logger.info("Media sent (audio): path={} message_id={}", file_path, sent.message_id)
                 return
             if kind == "voice":
                 sent = await self._app.bot.send_voice(
@@ -416,7 +414,7 @@ class TelegramBot:
                     caption=caption,
                     parse_mode=parse_mode,
                 )
-                logger.info("Media sent (voice): path=%s message_id=%s", file_path, sent.message_id)
+                logger.info("Media sent (voice): path={} message_id={}", file_path, sent.message_id)
                 return
             if kind == "animation":
                 sent = await self._app.bot.send_animation(
@@ -441,7 +439,7 @@ class TelegramBot:
                 caption=caption,
                 parse_mode=parse_mode,
             )
-            logger.info("Media sent (document): path=%s message_id=%s", file_path, sent.message_id)
+            logger.info("Media sent (document): path={} message_id={}", file_path, sent.message_id)
         except BadRequest as exc:
             if _is_chat_not_found_error(exc):
                 logger.warning(
