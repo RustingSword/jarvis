@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from html import unescape
 from pathlib import Path
 from typing import Iterable
+from urllib.parse import quote_plus
 
 import aiohttp
 import feedparser
@@ -75,21 +76,13 @@ class RssService:
             return
 
         async with self._lock:
-            digest, digest_md = await self.build_digest_bundle()
-            if not digest:
-                if self._config.send_empty:
-                    await self._messenger.send_message(
-                        chat_id,
-                        "RSS：今日无更新。",
-                        with_session_prefix=False,
-                    )
+            _digest, digest_md = await self.build_digest_bundle()
+            if not digest_md:
+                if self._config.send_empty and self._config.pdf_enabled:
+                    date_str = datetime.now().astimezone().strftime("%Y-%m-%d")
+                    empty_md = f"# RSS 晨间更新（{date_str}）\n\n今日无更新。"
+                    await self._send_pdf(chat_id, empty_md)
                 return
-            for chunk in _split_message(digest):
-                await self._messenger.send_message(
-                    chat_id,
-                    chunk,
-                    with_session_prefix=False,
-                )
             await self._send_pdf(chat_id, digest_md)
 
     async def build_digest_bundle(self) -> tuple[str, str]:
@@ -259,35 +252,15 @@ class RssService:
         link = (item.link or "").strip()
         if not link:
             return
-        async with semaphore:
-            try:
-                async with session.get(link) as resp:
-                    if resp.status >= 400:
-                        logger.warning("RSS fulltext fetch failed: {} HTTP {}", link, resp.status)
-                        return
-                    html = await resp.text(errors="ignore")
-            except Exception as exc:
-                logger.warning("RSS fulltext fetch error: {} ({})", link, exc)
-                return
-
-        try:
-            text = trafilatura.extract(
-                html,
-                include_comments=False,
-                include_tables=False,
-                favor_precision=True,
-                output_format="txt",
-            )
-        except Exception as exc:
-            logger.warning("RSS fulltext extract error: {} ({})", link, exc)
+        text = await _fetch_fulltext_from_url(session, semaphore, link)
+        if not _is_fulltext_acceptable(text, self._config.fulltext_min_chars):
+            if "web.archive.org/web/" not in link:
+                archive_url = await _resolve_wayback_snapshot(session, semaphore, link)
+                if archive_url:
+                    text = await _fetch_fulltext_from_url(session, semaphore, archive_url)
+        if not _is_fulltext_acceptable(text, self._config.fulltext_min_chars):
             return
-
-        if not text:
-            return
-        cleaned = _clean_text(text)
-        if self._config.fulltext_min_chars > 0 and len(cleaned) < self._config.fulltext_min_chars:
-            return
-        cleaned = _truncate(cleaned, self._config.fulltext_max_chars)
+        cleaned = _truncate(text or "", self._config.fulltext_max_chars)
         item.content_full = cleaned
 
     async def _summarize_item(
@@ -391,6 +364,79 @@ class _RssStateStore:
         tmp_path = self._path.with_suffix(".tmp")
         tmp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
         tmp_path.replace(self._path)
+
+
+async def _fetch_fulltext_from_url(
+    session: aiohttp.ClientSession,
+    semaphore: asyncio.Semaphore,
+    url: str,
+) -> str | None:
+    async with semaphore:
+        try:
+            async with session.get(url) as resp:
+                if resp.status >= 400:
+                    logger.warning("RSS fulltext fetch failed: {} HTTP {}", url, resp.status)
+                    return None
+                html = await resp.text(errors="ignore")
+        except Exception as exc:
+            logger.warning("RSS fulltext fetch error: {} ({})", url, exc)
+            return None
+
+    try:
+        text = trafilatura.extract(
+            html,
+            include_comments=False,
+            include_tables=False,
+            favor_precision=True,
+            output_format="txt",
+        )
+    except Exception as exc:
+        logger.warning("RSS fulltext extract error: {} ({})", url, exc)
+        return None
+
+    if not text:
+        return None
+    return _clean_text(text)
+
+
+async def _resolve_wayback_snapshot(
+    session: aiohttp.ClientSession,
+    semaphore: asyncio.Semaphore,
+    url: str,
+) -> str | None:
+    api_url = f"https://archive.org/wayback/available?url={quote_plus(url)}"
+    async with semaphore:
+        try:
+            async with session.get(api_url) as resp:
+                if resp.status >= 400:
+                    logger.warning("Wayback lookup failed: {} HTTP {}", url, resp.status)
+                    return None
+                data = await resp.json()
+        except Exception as exc:
+            logger.warning("Wayback lookup error: {} ({})", url, exc)
+            return None
+    if not isinstance(data, dict):
+        return None
+    snapshots = data.get("archived_snapshots")
+    if not isinstance(snapshots, dict):
+        return None
+    closest = snapshots.get("closest")
+    if not isinstance(closest, dict):
+        return None
+    if not closest.get("available"):
+        return None
+    snapshot_url = closest.get("url")
+    if not snapshot_url:
+        return None
+    return str(snapshot_url)
+
+
+def _is_fulltext_acceptable(text: str | None, min_chars: int) -> bool:
+    if not text:
+        return False
+    if min_chars <= 0:
+        return True
+    return len(text) >= min_chars
 
 
 def _read_feeds(path: Path) -> list[str]:
@@ -561,22 +607,43 @@ def _format_digest(updates: Iterable[FeedUpdate]) -> str:
 
 def _format_digest_markdown(updates: Iterable[FeedUpdate]) -> str:
     date_str = datetime.now().astimezone().strftime("%Y-%m-%d")
-    lines: list[str] = [f"# RSS 晨间更新（{date_str}）"]
-    for update in updates:
-        lines.append("")
+    lines: list[str] = [f"# RSS 晨间更新（{date_str}）", ""]
+    for idx, update in enumerate(updates):
+        if idx > 0:
+            lines.extend(["", "---", ""])
         lines.append(f"## {update.feed_title}")
+        lines.append("")
         for item in update.items:
             summary = item.summary_zh or _structured_fallback_summary(
                 item.content_full or item.summary or item.title,
                 400,
             )
-            lines.append(f"- **{item.title}**")
-            for line in summary.splitlines():
-                if line.strip():
-                    lines.append(f"  - {line.strip()}")
+            lines.append(f"### {item.title}")
+            lines.append("")
+            for line in _summary_to_bullets(summary):
+                lines.append(line)
             link = item.link
-            lines.append(f"  - 链接：[原文]({link})")
+            if link:
+                lines.append(f"- 原文：[链接]({link})")
+            lines.append("")
     return "\n".join(lines).strip()
+
+
+def _summary_to_bullets(summary: str) -> list[str]:
+    bullets: list[str] = []
+    for raw in summary.splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        if "：" in line:
+            label, rest = line.split("：", 1)
+            label = label.strip()
+            rest = rest.strip()
+            if label in {"要点", "细节", "影响"}:
+                bullets.append(f"- **{label}**：{rest}")
+                continue
+        bullets.append(f"- {line}")
+    return bullets
 
 
 def _split_sentences(text: str) -> list[str]:

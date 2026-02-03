@@ -44,6 +44,24 @@ def render_digest_pdf(
                 pdf_engine=pdf_engine,
                 timeout_seconds=timeout_seconds,
             )
+        except subprocess.TimeoutExpired:
+            retry_timeout = max(timeout_seconds, 120)
+            logger.warning(
+                "Pandoc PDF render timed out after {}s; retrying with {}s.",
+                timeout_seconds,
+                retry_timeout,
+            )
+            try:
+                return _render_with_pandoc(
+                    text,
+                    path,
+                    title=title,
+                    template_path=template_path,
+                    pdf_engine=pdf_engine,
+                    timeout_seconds=retry_timeout,
+                )
+            except Exception as exc:
+                logger.warning("Pandoc PDF retry failed, fallback to reportlab: {}", exc)
         except Exception as exc:
             logger.warning("Pandoc PDF render failed, fallback to reportlab: {}", exc)
 
