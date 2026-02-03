@@ -57,12 +57,46 @@ workers:
   command_concurrency: 1
   task_concurrency: 1
 
+rss:
+  enabled: true
+  feeds_path: "data/rss_feeds.txt"
+  state_path: "~/.jarvis/rss_state.json"
+  concurrency: 8
+  summary_concurrency: 2
+  timeout_seconds: 10
+  max_items_per_feed: 3
+  max_total_items: 30
+  summary_max_chars: 400
+  summary_input_chars: 4000
+  fulltext_enabled: true
+  fulltext_concurrency: 4
+  fulltext_timeout_seconds: 12
+  fulltext_min_chars: 200
+  fulltext_max_chars: 12000
+  pdf_enabled: true
+  pdf_output_dir: "reports/rss"
+  pdf_backend: "pandoc"
+  pdf_template: "reports/templates/zh_template.tex"
+  pdf_engine: "lualatex"
+  pdf_timeout_seconds: 30
+  translate: true
+  openai_model: "gpt-4o-mini"
+  openai_temperature: 0.2
+  openai_max_tokens: 256
+  user_agent: "JarvisRSS/1.0"
+  send_empty: false
+  max_ids_per_feed: 200
+
 triggers:
   scheduler:
     - name: "daily_summary"
       cron: "0 9 * * *"
       message: "每日提醒：记得规划今日安排。"
       # verbosity: "result"
+    # - name: "rss_morning_digest"
+    #   cron: "0 8 * * *"
+    #   chat_id: "YOUR_CHAT_ID"
+    #   action: "rss"
 
   monitors:
     - name: "cpu_alert"

@@ -12,7 +12,7 @@
 - **定时触发**：新增 scheduler job，`action: rss` 时直接调用 RSS 服务，不走 Codex。
 - **抓取解析**：aiohttp 并发拉取，feedparser 解析 RSS/Atom；失败源跳过。
 - **去重状态**：`~/.jarvis/rss_state.json` 保存每源最近已发送 ID 与 last_seen，原子写入。
-- **摘要翻译**：优先调用 OpenAI（可配置模型/温度/长度）；无 key 或失败时降级为原文摘要。
+- **摘要翻译**：优先调用 OpenAI 生成三段式摘要（要点/细节/影响）；无 key 或失败时降级为简易三段摘要。
 - **推送格式**：按源分组输出「标题 + 中文摘要 + 原文链接」。
 
 ## 关键配置（新增）
@@ -26,6 +26,14 @@
 - `rss.summary_max_chars` 摘要长度
 - `rss.translate` 是否翻译
 - `rss.openai_model` 摘要/翻译模型
+- `rss.fulltext_enabled` 是否抓取正文
+- `rss.fulltext_concurrency` 正文抓取并发
+- `rss.fulltext_timeout_seconds` 正文超时
+- `rss.fulltext_min_chars` 正文最小长度（过短则回退到 feed 摘要）
+- `rss.fulltext_max_chars` 正文最大长度（截断）
+- `rss.pdf_enabled` 是否生成 PDF
+- `rss.pdf_output_dir` PDF 输出目录
+- `rss.pdf_backend/pdf_template` 使用 pandoc 模板渲染 PDF（可回退 reportlab）
 
 ## 容错策略
 - 单源失败不影响整体。

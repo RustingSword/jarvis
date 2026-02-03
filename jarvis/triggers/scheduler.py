@@ -45,6 +45,7 @@ class SchedulerTrigger:
                     "chat_id": job.chat_id,
                     "message": job.message,
                     "verbosity": job.verbosity,
+                    "action": job.action,
                 },
             )
             logger.info("Scheduled job '{}' with cron '{}'", job.name, job.cron)
@@ -55,6 +56,7 @@ class SchedulerTrigger:
         chat_id: str | None,
         message: str | None,
         verbosity: str | None,
+        action: str | None,
     ) -> None:
         payload = {
             "type": "schedule",
@@ -62,5 +64,6 @@ class SchedulerTrigger:
             "chat_id": chat_id,
             "message": message,
             "verbosity": verbosity,
+            "action": action,
         }
         await self._event_bus.publish(TRIGGER_FIRED, payload)

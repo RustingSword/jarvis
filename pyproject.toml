@@ -21,6 +21,9 @@ dependencies = [
   "python-dotenv>=1.2.1",
   "loguru>=0.7.3",
   "edge-tts>=7.2.7",
+  "feedparser>=6.0.12",
+  "trafilatura>=2.0.0",
+  "reportlab>=4.4.9",
 ]
 
 [project.scripts]

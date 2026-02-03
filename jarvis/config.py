@@ -15,6 +15,7 @@ class SchedulerJobConfig:
     chat_id: str | None = None
     message: str | None = None
     verbosity: str | None = None
+    action: str | None = None
 
 
 @dataclass(slots=True)
@@ -141,6 +142,38 @@ class SkillsConfig:
 
 
 @dataclass(slots=True)
+class RssConfig:
+    enabled: bool = True
+    feeds_path: str = "data/rss_feeds.txt"
+    state_path: str = "~/.jarvis/rss_state.json"
+    concurrency: int = 8
+    summary_concurrency: int = 2
+    timeout_seconds: int = 10
+    max_items_per_feed: int = 3
+    max_total_items: int = 30
+    summary_max_chars: int = 400
+    summary_input_chars: int = 4000
+    fulltext_enabled: bool = True
+    fulltext_concurrency: int = 4
+    fulltext_timeout_seconds: int = 12
+    fulltext_min_chars: int = 200
+    fulltext_max_chars: int = 12000
+    pdf_enabled: bool = True
+    pdf_output_dir: str = "reports/rss"
+    pdf_backend: str = "pandoc"
+    pdf_template: str = "reports/templates/zh_template.tex"
+    pdf_engine: str = "lualatex"
+    pdf_timeout_seconds: int = 30
+    translate: bool = True
+    openai_model: str = "gpt-4o-mini"
+    openai_temperature: float = 0.2
+    openai_max_tokens: int = 256
+    user_agent: str = "JarvisRSS/1.0"
+    send_empty: bool = False
+    max_ids_per_feed: int = 200
+
+
+@dataclass(slots=True)
 class AppConfig:
     telegram: TelegramConfig
     codex: CodexConfig
@@ -153,6 +186,7 @@ class AppConfig:
     output: OutputConfig
     workers: WorkerConfig
     skills: SkillsConfig
+    rss: RssConfig
     config_path: str | None = None
 
 
@@ -183,6 +217,7 @@ def load_config(path: str | Path) -> AppConfig:
     workers_raw = data.get("workers", {}) or {}
     triggers_raw = data.get("triggers", {})
     skills_raw = data.get("skills", {})
+    rss_raw = data.get("rss", {}) or {}
 
     app_config = AppConfig(
         telegram=TelegramConfig(
@@ -223,6 +258,7 @@ def load_config(path: str | Path) -> AppConfig:
         ),
         triggers=_parse_triggers(triggers_raw),
         skills=_parse_skills(skills_raw),
+        rss=_parse_rss(rss_raw),
         config_path=str(config_path),
     )
     return _apply_env_overrides(app_config)
@@ -341,6 +377,7 @@ def _parse_triggers(raw: Any) -> TriggersConfig:
             chat_id=_optional_str(job.get("chat_id")),
             message=_optional_str(job.get("message")),
             verbosity=_optional_str(job.get("verbosity")),
+            action=_optional_str(job.get("action")),
         )
         for job in scheduler_raw
         if isinstance(job, dict)
@@ -401,6 +438,41 @@ def _parse_skills(raw: Any) -> SkillsConfig:
             )
         )
     return SkillsConfig(sources=sources)
+
+
+def _parse_rss(raw: Any) -> RssConfig:
+    if not isinstance(raw, dict):
+        raw = {}
+    return RssConfig(
+        enabled=bool(raw.get("enabled", True)),
+        feeds_path=str(raw.get("feeds_path", "data/rss_feeds.txt")),
+        state_path=str(raw.get("state_path", "~/.jarvis/rss_state.json")),
+        concurrency=int(raw.get("concurrency", 8)),
+        summary_concurrency=int(raw.get("summary_concurrency", 2)),
+        timeout_seconds=int(raw.get("timeout_seconds", 10)),
+        max_items_per_feed=int(raw.get("max_items_per_feed", 3)),
+        max_total_items=int(raw.get("max_total_items", 30)),
+        summary_max_chars=int(raw.get("summary_max_chars", 400)),
+        summary_input_chars=int(raw.get("summary_input_chars", 4000)),
+        fulltext_enabled=bool(raw.get("fulltext_enabled", True)),
+        fulltext_concurrency=int(raw.get("fulltext_concurrency", 4)),
+        fulltext_timeout_seconds=int(raw.get("fulltext_timeout_seconds", 12)),
+        fulltext_min_chars=int(raw.get("fulltext_min_chars", 200)),
+        fulltext_max_chars=int(raw.get("fulltext_max_chars", 12000)),
+        pdf_enabled=bool(raw.get("pdf_enabled", True)),
+        pdf_output_dir=str(raw.get("pdf_output_dir", "reports/rss")),
+        pdf_backend=str(raw.get("pdf_backend", "pandoc")),
+        pdf_template=str(raw.get("pdf_template", "reports/templates/zh_template.tex")),
+        pdf_engine=str(raw.get("pdf_engine", "lualatex")),
+        pdf_timeout_seconds=int(raw.get("pdf_timeout_seconds", 30)),
+        translate=bool(raw.get("translate", True)),
+        openai_model=str(raw.get("openai_model", "gpt-4o-mini")),
+        openai_temperature=float(raw.get("openai_temperature", 0.2)),
+        openai_max_tokens=int(raw.get("openai_max_tokens", 256)),
+        user_agent=str(raw.get("user_agent", "JarvisRSS/1.0")),
+        send_empty=bool(raw.get("send_empty", False)),
+        max_ids_per_feed=int(raw.get("max_ids_per_feed", 200)),
+    )
 
 
 def persist_skill_source(config_path: str, source: SkillSourceConfig) -> bool:

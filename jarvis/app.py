@@ -27,6 +27,7 @@ from jarvis.messaging.messenger import Messenger
 from jarvis.pipeline.message_pipeline import MessagePipeline
 from jarvis.pipeline.prompt_builder import PromptBuilder
 from jarvis.pipeline.task_pipeline import TaskPipeline
+from jarvis.rss import RssService
 from jarvis.storage import Storage
 from jarvis.telegram import TelegramBot
 from jarvis.triggers import TriggerManager
@@ -53,6 +54,13 @@ class JarvisApp:
         self._triggers = TriggerManager(self._event_bus, config.triggers)
 
         self._messenger = Messenger(self._event_bus, self._storage, tts=self._tts)
+        self._rss = RssService(
+            config.rss,
+            self._messenger,
+            openai_base_url=config.openai.base_url,
+            openai_api_key=os.getenv("OPENAI_API_KEY"),
+            config_path=config.config_path,
+        )
         self._verbosity = VerbosityManager(self._storage, config.output.verbosity)
         self._progress = CodexProgressHandler(self._messenger, self._storage, self._verbosity)
         self._message_sent_handler = MessageSentHandler(self._storage)
@@ -92,7 +100,10 @@ class JarvisApp:
             self._verbosity,
             self._task_worker.enqueue,
         )
-        self._trigger_dispatcher = TriggerDispatcher(self._message_worker.enqueue)
+        self._trigger_dispatcher = TriggerDispatcher(
+            self._message_worker.enqueue,
+            rss_runner=self._rss,
+        )
         self._command_worker = QueueWorker(
             self._command_router.handle,
             name="command-worker",
