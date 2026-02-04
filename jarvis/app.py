@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+from pathlib import Path
 
 from dotenv import load_dotenv
 from loguru import logger
@@ -21,6 +22,7 @@ from jarvis.handlers.command_router import CommandRouter
 from jarvis.handlers.message_sent import MessageSentHandler
 from jarvis.handlers.progress import CodexProgressHandler
 from jarvis.handlers.trigger_dispatcher import TriggerDispatcher
+from jarvis.heartbeat.runner import HeartbeatConfig, HeartbeatRunner
 from jarvis.memory import MemoryManager
 from jarvis.messaging.bundler import MessageBundler
 from jarvis.messaging.messenger import Messenger
@@ -90,6 +92,18 @@ class JarvisApp:
             name="task-worker",
             concurrency=config.workers.task_concurrency,
         )
+        config_dir = (
+            Path(config.config_path).expanduser().parent if config.config_path else Path.cwd()
+        )
+        heartbeat_runner = HeartbeatRunner(
+            HeartbeatConfig(
+                state_path=Path("~/.jarvis/heartbeat_state.json").expanduser(),
+                heartbeat_paths=(
+                    config_dir / "HEARTBEAT.md",
+                    config_dir / "heartbeat.md",
+                ),
+            )
+        )
         self._command_router = CommandRouter(
             self._messenger,
             self._storage,
@@ -103,6 +117,7 @@ class JarvisApp:
         self._trigger_dispatcher = TriggerDispatcher(
             self._message_worker.enqueue,
             rss_runner=self._rss,
+            heartbeat_runner=heartbeat_runner,
         )
         self._command_worker = QueueWorker(
             self._command_router.handle,
