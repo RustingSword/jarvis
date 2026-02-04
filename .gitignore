@@ -1,4 +1,6 @@
-reports/
+reports/*
+!reports/templates/
+!reports/templates/zh_template.tex
 .venv/
 __pycache__/
 *.log
