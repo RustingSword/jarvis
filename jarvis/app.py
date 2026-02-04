@@ -32,6 +32,7 @@ from jarvis.pipeline.prompt_builder import PromptBuilder
 from jarvis.pipeline.task_pipeline import TaskPipeline
 from jarvis.rss import RssService
 from jarvis.storage import Storage
+from jarvis.tasks import TaskStatusProvider
 from jarvis.telegram import TelegramBot
 from jarvis.triggers import TriggerManager
 from jarvis.verbosity import VerbosityManager
@@ -120,6 +121,13 @@ class JarvisApp:
             config.config_path,
             self._verbosity,
             self._task_worker.enqueue,
+            TaskStatusProvider(
+                [
+                    self._message_worker,
+                    self._command_worker,
+                    self._task_worker,
+                ]
+            ),
         )
         self._trigger_dispatcher = TriggerDispatcher(
             self._message_worker.enqueue,

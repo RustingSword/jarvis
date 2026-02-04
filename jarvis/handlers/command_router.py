@@ -15,6 +15,7 @@ from jarvis.messaging.messenger import Messenger
 from jarvis.pipeline.prompt_builder import PromptBuilder
 from jarvis.skills import SkillError, install_skill, list_installed_skills, list_remote_skills
 from jarvis.storage import Storage
+from jarvis.tasks import TaskStatusProvider
 from jarvis.verbosity import VerbosityManager
 
 EventEnqueuer = Callable[[Event], Awaitable[None]]
@@ -31,6 +32,7 @@ class CommandRouter:
         config_path: str | None,
         verbosity: VerbosityManager,
         enqueue_task: EventEnqueuer | None = None,
+        task_status_provider: TaskStatusProvider | None = None,
     ) -> None:
         self._messenger = messenger
         self._storage = storage
@@ -40,6 +42,7 @@ class CommandRouter:
         self._config_path = config_path
         self._verbosity = verbosity
         self._enqueue_task = enqueue_task
+        self._task_status_provider = task_status_provider
         self._prompt_builder = PromptBuilder(memory)
 
         self._handlers = {
@@ -51,6 +54,7 @@ class CommandRouter:
             "verbosity": self._cmd_verbosity,
             "skills": self._cmd_skills,
             "memory": self._cmd_memory,
+            "tasks": self._cmd_tasks,
         }
 
     async def handle(self, event: Event) -> None:
@@ -92,6 +96,7 @@ class CommandRouter:
                         "`/memory get <path> [from] [lines]` | "
                         "`/memory index` | `/memory status` - 记忆功能"
                     ),
+                    "- `/tasks` - 查看任务队列与正在处理的任务",
                     "",
                     "提示：每条消息前会显示会话标识，如 `> [12]`。",
                 ]
@@ -198,6 +203,34 @@ class CommandRouter:
             return
 
         await self._messenger.send_markdown(chat_id, f"verbosity 已设置为: `{normalized}`")
+
+    async def _cmd_tasks(self, chat_id: str, args: list[str]) -> None:
+        if not self._task_status_provider:
+            await self._messenger.send_markdown(chat_id, "任务状态功能未启用。")
+            return
+        snapshots = await self._task_status_provider.snapshot()
+        lines = [
+            "| Worker | Pending | Active | Age | Task |",
+            "| --- | --- | --- | --- | --- |",
+        ]
+        total_pending = 0
+        total_active = 0
+        now = datetime.now(timezone.utc)
+        for worker in snapshots:
+            pending = worker.pending
+            total_pending += pending
+            if not worker.active:
+                lines.append(f"| {worker.name} | {pending} | 0 | - | - |")
+                continue
+            total_active += len(worker.active)
+            for idx, active in enumerate(worker.active):
+                age = _format_age(now, active.started_at)
+                name = worker.name if idx == 0 else ""
+                pend = str(pending) if idx == 0 else ""
+                lines.append(f"| {name} | {pend} | 1 | {age} | {active.summary or '-'} |")
+        lines.append("")
+        lines.append(f"总计：Pending {total_pending} / Active {total_active}")
+        await self._messenger.send_markdown(chat_id, "\n".join(lines))
 
     async def _handle_compact(self, chat_id: str) -> None:
         session = await self._storage.get_session(chat_id)
@@ -542,3 +575,14 @@ def _format_local_time(dt: datetime) -> str:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     return dt.astimezone().isoformat(sep=" ", timespec="minutes")
+
+
+def _format_age(now: datetime, started_at: datetime) -> str:
+    delta = max(0, int((now - started_at).total_seconds()))
+    hours, remainder = divmod(delta, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    if hours > 0:
+        return f"{hours}h{minutes:02d}m"
+    if minutes > 0:
+        return f"{minutes}m{seconds:02d}s"
+    return f"{seconds}s"

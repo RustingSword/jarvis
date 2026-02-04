@@ -37,6 +37,7 @@ COMMAND_SPECS = (
     ("verbosity", "设置输出详细程度"),
     ("skills", "查看或安装技能"),
     ("memory", "记忆搜索与写入"),
+    ("tasks", "查看任务队列"),
 )
 
 TELEGRAM_MESSAGE_MAX_CHARS = 4096
