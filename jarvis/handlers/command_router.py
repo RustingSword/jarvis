@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import json
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta, timezone
@@ -209,10 +210,7 @@ class CommandRouter:
             await self._messenger.send_markdown(chat_id, "任务状态功能未启用。")
             return
         snapshots = await self._task_status_provider.snapshot()
-        lines = [
-            "| Worker | Pending | Active | Age | Task |",
-            "| --- | --- | --- | --- | --- |",
-        ]
+        rows: list[list[str]] = []
         total_pending = 0
         total_active = 0
         now = datetime.now(timezone.utc)
@@ -220,17 +218,27 @@ class CommandRouter:
             pending = worker.pending
             total_pending += pending
             if not worker.active:
-                lines.append(f"| {worker.name} | {pending} | 0 | - | - |")
+                rows.append([worker.name, str(pending), "0", "-", "-"])
                 continue
             total_active += len(worker.active)
             for idx, active in enumerate(worker.active):
                 age = _format_age(now, active.started_at)
                 name = worker.name if idx == 0 else ""
                 pend = str(pending) if idx == 0 else ""
-                lines.append(f"| {name} | {pend} | 1 | {age} | {active.summary or '-'} |")
-        lines.append("")
-        lines.append(f"总计：Pending {total_pending} / Active {total_active}")
-        await self._messenger.send_markdown(chat_id, "\n".join(lines))
+                rows.append([name, pend, "1", age, active.summary or "-"])
+        table_html = _render_table_html(
+            ["Worker", "Pending", "Active", "Age", "Task"],
+            rows,
+        )
+        summary = f"总计：Pending {total_pending} / Active {total_active}"
+        message = "\n".join(
+            [
+                "<b>任务队列</b>",
+                table_html,
+                html.escape(summary),
+            ]
+        )
+        await self._messenger.send_message(chat_id, message, parse_mode="HTML")
 
     async def _handle_compact(self, chat_id: str) -> None:
         session = await self._storage.get_session(chat_id)
@@ -569,6 +577,20 @@ def _truncate_text(text: str, max_chars: int) -> str:
     if len(text) <= limit:
         return text
     return text[:limit].rstrip() + "\n...(truncated)"
+
+
+def _render_table_html(headers: list[str], rows: list[list[str]]) -> str:
+    widths = [len(h) for h in headers]
+    for row in rows:
+        for idx, cell in enumerate(row):
+            widths[idx] = max(widths[idx], len(cell))
+
+    def format_row(values: list[str]) -> str:
+        return " | ".join(value.ljust(widths[idx]) for idx, value in enumerate(values))
+
+    lines = [format_row(headers), "-+-".join("-" * width for width in widths)]
+    lines.extend(format_row(row) for row in rows)
+    return f"<pre>{html.escape('\\n'.join(lines))}</pre>"
 
 
 def _format_local_time(dt: datetime) -> str:

@@ -11,7 +11,7 @@ from jarvis.audio.transcriber import TranscriptionService
 from jarvis.audio.tts import TTSService
 from jarvis.codex import CodexManager
 from jarvis.config import AppConfig
-from jarvis.event_bus import EventBus
+from jarvis.event_bus import Event, EventBus
 from jarvis.events import (
     TELEGRAM_COMMAND,
     TELEGRAM_MESSAGE_RECEIVED,
@@ -94,6 +94,11 @@ class JarvisApp:
             name="task-worker",
             concurrency=config.workers.task_concurrency,
         )
+        self._command_worker = QueueWorker(
+            self._handle_command,
+            name="command-worker",
+            concurrency=config.workers.command_concurrency,
+        )
         config_dir = (
             Path(config.config_path).expanduser().parent if config.config_path else Path.cwd()
         )
@@ -135,11 +140,6 @@ class JarvisApp:
             heartbeat_runner=heartbeat_runner,
             heartbeat_pipeline=heartbeat_pipeline,
         )
-        self._command_worker = QueueWorker(
-            self._command_router.handle,
-            name="command-worker",
-            concurrency=config.workers.command_concurrency,
-        )
         self._bundler = MessageBundler(
             config.telegram.bundle_wait_seconds,
             self._message_worker.enqueue,
@@ -149,6 +149,9 @@ class JarvisApp:
         self._event_bus.subscribe(TELEGRAM_COMMAND, self._command_worker.enqueue)
         self._event_bus.subscribe(TELEGRAM_MESSAGE_SENT, self._message_sent_handler.handle)
         self._event_bus.subscribe(TRIGGER_FIRED, self._trigger_dispatcher.handle)
+
+    async def _handle_command(self, event: Event) -> None:
+        await self._command_router.handle(event)
 
     async def start(self) -> None:
         await self._storage.connect()
