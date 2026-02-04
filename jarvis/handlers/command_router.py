@@ -595,7 +595,7 @@ def _render_table_html(headers: list[str], rows: list[list[str]]) -> str:
 
     lines = [format_row(headers), "-+-".join("-" * width for width in widths)]
     lines.extend(format_row(row) for row in rows)
-    return f"<pre>{html.escape('\\n'.join(lines))}</pre>"
+    return f"<pre>{html.escape('\n'.join(lines))}</pre>"
 
 
 def _format_local_time(dt: datetime) -> str:
