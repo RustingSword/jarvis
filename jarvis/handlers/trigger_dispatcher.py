@@ -9,6 +9,7 @@ from loguru import logger
 from jarvis.event_bus import Event
 from jarvis.formatting import normalize_verbosity
 from jarvis.heartbeat.runner import HeartbeatRunner
+from jarvis.pipeline.heartbeat_pipeline import HeartbeatPipeline
 
 EventEnqueuer = Callable[[Event], Awaitable[None]]
 
@@ -24,10 +25,12 @@ class TriggerDispatcher:
         *,
         rss_runner: RssRunner | None = None,
         heartbeat_runner: HeartbeatRunner | None = None,
+        heartbeat_pipeline: HeartbeatPipeline | None = None,
     ) -> None:
         self._enqueue_message = enqueue_message
         self._rss_runner = rss_runner
         self._heartbeat_runner = heartbeat_runner
+        self._heartbeat_pipeline = heartbeat_pipeline
 
     async def handle(self, event: Event) -> None:
         payload = event.payload
@@ -84,6 +87,9 @@ class TriggerDispatcher:
         if not self._heartbeat_runner:
             logger.warning("Heartbeat runner not configured; skipping schedule.")
             return
+        if not self._heartbeat_pipeline:
+            logger.warning("Heartbeat pipeline not configured; skipping schedule.")
+            return
         content = self._heartbeat_runner.run()
         if not content:
             return
@@ -91,12 +97,7 @@ class TriggerDispatcher:
         if not chat_id:
             logger.warning("Heartbeat schedule missing chat_id.")
             return
-        verbosity = None
-        raw_verbosity = payload.get("verbosity")
-        if raw_verbosity:
-            verbosity = normalize_verbosity(str(raw_verbosity))
-        verbosity = verbosity or "result"
-        await self._dispatch_to_codex(chat_id, content, verbosity=verbosity)
+        await self._heartbeat_pipeline.handle(str(chat_id), content)
 
     async def _handle_webhook(self, payload: dict) -> None:
         webhook_payload = payload.get("payload")

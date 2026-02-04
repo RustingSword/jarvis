@@ -26,6 +26,7 @@ from jarvis.heartbeat.runner import HeartbeatConfig, HeartbeatRunner
 from jarvis.memory import MemoryManager
 from jarvis.messaging.bundler import MessageBundler
 from jarvis.messaging.messenger import Messenger
+from jarvis.pipeline.heartbeat_pipeline import HeartbeatPipeline
 from jarvis.pipeline.message_pipeline import MessagePipeline
 from jarvis.pipeline.prompt_builder import PromptBuilder
 from jarvis.pipeline.task_pipeline import TaskPipeline
@@ -104,6 +105,12 @@ class JarvisApp:
                 ),
             )
         )
+        heartbeat_pipeline = HeartbeatPipeline(
+            self._codex,
+            self._storage,
+            self._prompt_builder,
+            self._messenger,
+        )
         self._command_router = CommandRouter(
             self._messenger,
             self._storage,
@@ -118,6 +125,7 @@ class JarvisApp:
             self._message_worker.enqueue,
             rss_runner=self._rss,
             heartbeat_runner=heartbeat_runner,
+            heartbeat_pipeline=heartbeat_pipeline,
         )
         self._command_worker = QueueWorker(
             self._command_router.handle,
