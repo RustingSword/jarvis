@@ -83,6 +83,15 @@ def _render_with_pandoc(
         content = f"# {title}\n\n{content}"
     md_path.write_text(content, encoding="utf-8")
 
+    if template_path:
+        try:
+            template_text = template_path.read_text(encoding="utf-8")
+            updated = _inject_unicode_mappings(content, template_text)
+            if updated != template_text:
+                template_path.write_text(updated, encoding="utf-8")
+        except Exception as exc:
+            logger.warning("Failed to inject unicode mappings into template: {}", exc)
+
     cmd = [
         "pandoc",
         str(md_path),
@@ -187,3 +196,92 @@ def _strip_markdown(text: str) -> str:
     stripped = re.sub(r"\[(.*?)\]\((.*?)\)", r"\1 (\2)", stripped)
     stripped = re.sub(r"^\s*-\s+", "• ", stripped, flags=re.MULTILINE)
     return stripped
+
+
+def _inject_unicode_mappings(text: str, template: str) -> str:
+    if not text:
+        return template
+
+    emoji_ranges = [
+        (0x1F1E6, 0x1F1FF),
+        (0x1F300, 0x1F5FF),
+        (0x1F600, 0x1F64F),
+        (0x1F680, 0x1F6FF),
+        (0x1F700, 0x1F77F),
+        (0x1F780, 0x1F7FF),
+        (0x1F800, 0x1F8FF),
+        (0x1F900, 0x1F9FF),
+        (0x1FA00, 0x1FA6F),
+        (0x1FA70, 0x1FAFF),
+        (0x2600, 0x26FF),
+        (0x2700, 0x27BF),
+        (0x2300, 0x23FF),
+    ]
+    symbol_ranges = [
+        (0x2B00, 0x2BFF),
+    ]
+
+    def _in_ranges(cp: int, ranges: list[tuple[int, int]]) -> bool:
+        return any(lo <= cp <= hi for lo, hi in ranges)
+
+    emojis: set[str] = set()
+    symbols: set[str] = set()
+    for ch in text:
+        if ch == "\ufe0f":  # variation selector-16 handled by font
+            continue
+        cp = ord(ch)
+        if _in_ranges(cp, symbol_ranges):
+            symbols.add(ch)
+        elif _in_ranges(cp, emoji_ranges):
+            emojis.add(ch)
+
+    if not emojis and not symbols:
+        return template
+
+    existing = set(re.findall(r"\\newunicodechar\{(.+?)\}", template))
+    emoji_lines = [
+        f"\\newunicodechar{{{ch}}}{{{{\\emojifont {ch}}}}}"
+        for ch in sorted(emojis, key=ord)
+        if ch not in existing
+    ]
+    symbol_lines = [
+        f"\\newunicodechar{{{ch}}}{{{{\\symbolfont {ch}}}}}"
+        for ch in sorted(symbols, key=ord)
+        if ch not in existing
+    ]
+
+    if not emoji_lines and not symbol_lines:
+        return template
+
+    emojifont_marker = r"\newfontfamily\emojifont{Noto Color Emoji}[Renderer=HarfBuzz]"
+    symbolfont_marker = (
+        r"\newfontfamily\symbolfont{NotoSansSymbols2-Regular.ttf}["
+        r"Path=/usr/share/fonts/truetype/noto/]"
+    )
+
+    injected = template
+    if symbol_lines and "\\newfontfamily\\symbolfont" not in injected:
+        if emojifont_marker in injected:
+            injected = injected.replace(
+                emojifont_marker, emojifont_marker + "\n" + symbolfont_marker, 1
+            )
+        else:
+            injected = injected + "\n" + symbolfont_marker + "\n"
+
+    if emoji_lines:
+        if emojifont_marker in injected:
+            injected = injected.replace(
+                emojifont_marker, emojifont_marker + "\n" + "\n".join(emoji_lines), 1
+            )
+        else:
+            injected = injected + "\n" + "\n".join(emoji_lines) + "\n"
+
+    if symbol_lines:
+        if symbolfont_marker in injected:
+            injected = injected.replace(
+                symbolfont_marker, symbolfont_marker + "\n" + "\n".join(symbol_lines), 1
+            )
+        else:
+            injected = injected + "\n" + "\n".join(symbol_lines) + "\n"
+
+    return injected

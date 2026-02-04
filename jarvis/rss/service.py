@@ -90,7 +90,9 @@ class RssService:
         if not updates:
             return "", ""
         await self._summarize_updates(updates)
-        return _format_digest(updates), _format_digest_markdown(updates)
+        return _format_digest(updates, self._config.summary_max_chars), _format_digest_markdown(
+            updates, self._config.summary_max_chars
+        )
 
     async def build_digest(self) -> str:
         digest, _digest_md = await self.build_digest_bundle()
@@ -541,7 +543,7 @@ def _structured_fallback_summary(text: str, max_chars: int) -> str:
         return ""
     sentences = _split_sentences(base)
     if not sentences:
-        return _truncate(base, max_chars)
+        return base
     key = sentences[0]
     details = " ".join(sentences[1:3]) or sentences[0]
     impact = sentences[-1] if len(sentences) > 1 else sentences[0]
@@ -552,7 +554,7 @@ def _structured_fallback_summary(text: str, max_chars: int) -> str:
             f"影响：{impact}",
         ]
     )
-    return _truncate(summary, max_chars)
+    return summary
 
 
 def _normalize_structured_summary(summary: str | None, max_chars: int, fallback: str) -> str:
@@ -561,7 +563,6 @@ def _normalize_structured_summary(summary: str | None, max_chars: int, fallback:
     text = summary.strip().replace("\r\n", "\n").replace("\r", "\n")
     if not any(label in text for label in ("要点：", "细节：", "影响：")):
         return fallback
-    text = _truncate(text, max_chars)
     return text
 
 
@@ -586,7 +587,7 @@ def _sort_key(item: RssItem) -> float:
     return 0.0
 
 
-def _format_digest(updates: Iterable[FeedUpdate]) -> str:
+def _format_digest(updates: Iterable[FeedUpdate], summary_max_chars: int) -> str:
     date_str = datetime.now().astimezone().strftime("%Y-%m-%d")
     lines: list[str] = [f"RSS 晨间更新（{date_str}）"]
     for update in updates:
@@ -595,7 +596,7 @@ def _format_digest(updates: Iterable[FeedUpdate]) -> str:
         for item in update.items:
             summary = item.summary_zh or _structured_fallback_summary(
                 item.content_full or item.summary or item.title,
-                400,
+                summary_max_chars,
             )
             lines.append(f"- {item.title}")
             lines.append("  摘要：")
@@ -605,7 +606,7 @@ def _format_digest(updates: Iterable[FeedUpdate]) -> str:
     return "\n".join(lines).strip()
 
 
-def _format_digest_markdown(updates: Iterable[FeedUpdate]) -> str:
+def _format_digest_markdown(updates: Iterable[FeedUpdate], summary_max_chars: int) -> str:
     date_str = datetime.now().astimezone().strftime("%Y-%m-%d")
     lines: list[str] = [f"# RSS 晨间更新（{date_str}）", ""]
     for idx, update in enumerate(updates):
@@ -616,7 +617,7 @@ def _format_digest_markdown(updates: Iterable[FeedUpdate]) -> str:
         for item in update.items:
             summary = item.summary_zh or _structured_fallback_summary(
                 item.content_full or item.summary or item.title,
-                400,
+                summary_max_chars,
             )
             lines.append(f"### {item.title}")
             lines.append("")
