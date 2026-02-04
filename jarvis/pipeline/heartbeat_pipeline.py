@@ -36,7 +36,7 @@ class HeartbeatPipeline:
             return
 
         response_text = result.response_text.strip() if result.response_text else ""
-        if response_text == "HEARTBEAT_OK":
+        if "HEARTBEAT_OK" in response_text:
             logger.debug("Heartbeat returned HEARTBEAT_OK; suppressing output")
             return
 
