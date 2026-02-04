@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CONFIG_PATH="${CONFIG_PATH:-${ROOT_DIR}/config.yaml}"
 PID_FILE="${ROOT_DIR}/.jarvis.pid"
+STOP_DELAY_SECONDS=2
 
 if [ -f "${ROOT_DIR}/.env" ]; then
   set -a
@@ -64,6 +65,9 @@ stop() {
   fi
 
   local pid=$(get_pid)
+  if [ "${STOP_DELAY_SECONDS}" -gt 0 ]; then
+    sleep "${STOP_DELAY_SECONDS}"
+  fi
   echo "Stopping Jarvis (PID: ${pid})..."
   kill "${pid}"
 
