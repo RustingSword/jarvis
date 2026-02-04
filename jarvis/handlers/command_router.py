@@ -238,7 +238,12 @@ class CommandRouter:
                 html.escape(summary),
             ]
         )
-        await self._messenger.send_message(chat_id, message, parse_mode="HTML")
+        await self._messenger.send_message(
+            chat_id,
+            message,
+            parse_mode="HTML",
+            with_session_prefix=False,
+        )
 
     async def _handle_compact(self, chat_id: str) -> None:
         session = await self._storage.get_session(chat_id)
