@@ -333,10 +333,8 @@ def _resolve_media_path(raw: str, workspace_dir: str) -> str | None:
     else:
         candidate = candidate.resolve()
     if not candidate.exists():
-        logger.warning("Media path does not exist: {} (raw={})", candidate, raw)
         return None
     if candidate.is_dir():
-        logger.warning("Media path is a directory, skipping: {} (raw={})", candidate, raw)
         return None
     return str(candidate)
 
