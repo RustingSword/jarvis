@@ -151,6 +151,28 @@ class CommandRouter:
         )
 
     async def _cmd_compact(self, chat_id: str, args: list[str]) -> None:
+        if self._enqueue_task:
+            session = await self._storage.get_session(chat_id)
+            if not session:
+                await self._messenger.send_markdown(chat_id, "当前没有可压缩的会话。")
+                return
+            await self._storage.clear_session(chat_id)
+            event = Event(
+                type="command.compact",
+                payload={
+                    "chat_id": str(chat_id),
+                    "thread_id": session.thread_id,
+                    "session_id": session.session_id,
+                },
+                created_at=datetime.now(timezone.utc),
+            )
+            await self._enqueue_task(event)
+            await self._messenger.send_markdown(
+                chat_id,
+                "会话压缩已进入队列，完成后会提示。",
+                with_session_prefix=False,
+            )
+            return
         await self._handle_compact(chat_id)
 
     async def _cmd_resume(self, chat_id: str, args: list[str]) -> None:
@@ -210,24 +232,42 @@ class CommandRouter:
             await self._messenger.send_markdown(chat_id, "任务状态功能未启用。")
             return
         snapshots = await self._task_status_provider.snapshot()
+        session_cache: dict[str, str] = {}
         rows: list[list[str]] = []
         total_pending = 0
         total_active = 0
         now = datetime.now(timezone.utc)
+
+        async def resolve_session_id(active) -> str:
+            if active.session_id:
+                return str(active.session_id)
+            if not active.chat_id:
+                return "-"
+            cached = session_cache.get(active.chat_id)
+            if cached is not None:
+                return cached
+            record = await self._storage.get_session(active.chat_id)
+            if record and record.session_id is not None:
+                session_cache[active.chat_id] = str(record.session_id)
+                return session_cache[active.chat_id]
+            session_cache[active.chat_id] = "-"
+            return "-"
+
         for worker in snapshots:
             pending = worker.pending
             total_pending += pending
             if not worker.active:
-                rows.append([worker.name, str(pending), "0", "-", "-"])
+                rows.append([worker.name, str(pending), "0", "-", "-", "-"])
                 continue
             total_active += len(worker.active)
             for idx, active in enumerate(worker.active):
                 age = _format_age(now, active.started_at)
                 name = worker.name if idx == 0 else ""
                 pend = str(pending) if idx == 0 else ""
-                rows.append([name, pend, "1", age, active.summary or "-"])
+                session_id = await resolve_session_id(active)
+                rows.append([name, pend, "1", age, session_id, active.summary or "-"])
         table_html = _render_table_html(
-            ["Worker", "Pending", "Active", "Age", "Task"],
+            ["Worker", "Pending", "Active", "Age", "Session", "Task"],
             rows,
         )
         summary = f"总计：Pending {total_pending} / Active {total_active}"

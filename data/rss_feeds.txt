@@ -19,7 +19,7 @@ https://www.righto.com/feeds/posts/default
 https://lucumr.pocoo.org/feed.atom
 https://skyfall.dev/rss.xml
 https://garymarcus.substack.com/feed
-https://rachelbythebay.com/w/atom.xml
+# disabled 2026-02-08 (timeout): https://rachelbythebay.com/w/atom.xml
 https://overreacted.io/rss.xml
 https://timsh.org/rss/
 https://www.johndcook.com/blog/feed/
@@ -89,4 +89,4 @@ https://blog.miguelgrinberg.com/feed
 https://keygen.sh/blog/feed.xml
 https://mjg59.dreamwidth.org/data/rss
 https://computer.rip/rss.xml
-https://www.tedunangst.com/flak/rss
+# disabled 2026-02-08 (timeout): https://www.tedunangst.com/flak/rss

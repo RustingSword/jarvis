@@ -7,31 +7,35 @@
 \ltjsetparameter{autospacing=true, autoxspacing=true}
 \ltjdefcharrange{10}{"2700-"27BF}
 \ltjdefcharrange{11}{"2B00-"2BFF}
-\ltjsetparameter{jacharrange={-1, +2, +3, -4, -5, +6, +7, -8, +9, -10, -11}}
+\ltjsetparameter{jacharrange={-1, -2, +3, -4, -5, +6, +7, -8, +9, -10, -11}}
+% Fallback fonts for missing glyphs (emoji/symbols/arabic)
 \defaultfontfeatures{Renderer=HarfBuzz}
-\setmainfont{NotoSerifCJK-Regular.ttc}[
-  Path=/usr/share/fonts/opentype/noto/,
-  BoldFont=NotoSerifCJK-Bold.ttc
+\directlua{luaotfload.add_fallback("global", {"Noto Color Emoji:mode=harf", "Noto Sans Symbols2:mode=harf", "Noto Sans Symbols:mode=harf", "Noto Sans:mode=harf", "Noto Naskh Arabic:mode=harf", "Noto Sans Arabic:mode=harf"})}
+\setmainfont{FandolSong-Regular.otf}[
+  Path=/usr/share/texlive/texmf-dist/fonts/opentype/public/fandol/,
+  BoldFont=FandolSong-Bold.otf,
+  RawFeature={fallback=global}
 ]
-\setsansfont{NotoSansCJK-Regular.ttc}[
-  Path=/usr/share/fonts/opentype/noto/,
-  BoldFont=NotoSansCJK-Bold.ttc
+\setsansfont{FandolHei-Regular.otf}[
+  Path=/usr/share/texlive/texmf-dist/fonts/opentype/public/fandol/,
+  BoldFont=FandolHei-Bold.otf,
+  RawFeature={fallback=global}
 ]
 \setmonofont{NotoSansMono-Regular.ttf}[
-  Path=/usr/share/fonts/truetype/noto/
+  Path=/usr/share/fonts/truetype/noto/,
+  RawFeature={fallback=global}
 ]
-\setmainjfont{NotoSerifCJK-Regular.ttc}[
-  Path=/usr/share/fonts/opentype/noto/,
-  BoldFont=NotoSerifCJK-Bold.ttc
+\setmainjfont{Noto Serif CJK SC}[
+  BoldFont={Noto Serif CJK SC:style=Bold}
 ]
-\setsansjfont{NotoSansCJK-Regular.ttc}[
-  Path=/usr/share/fonts/opentype/noto/,
-  BoldFont=NotoSansCJK-Bold.ttc
+\setsansjfont{Noto Sans CJK SC}[
+  BoldFont={Noto Sans CJK SC:style=Bold}
 ]
 \setmonojfont{NotoSansMono-Regular.ttf}[
   Path=/usr/share/fonts/truetype/noto/
 ]
 \newfontfamily\emojifont{Noto Color Emoji}[Renderer=HarfBuzz]
+\newfontfamily\latinfont{Noto Sans}[Renderer=HarfBuzz, RawFeature={fallback=global}]
 \newunicodechar{★}{{\emojifont ★}}
 \newunicodechar{☆}{{\emojifont ☆}}
 \newfontfamily\symbolfont{NotoSansSymbols2-Regular.ttf}[Path=/usr/share/fonts/truetype/noto/]
@@ -41,6 +45,15 @@
 \newunicodechar{🔥}{{\emojifont 🔥}}
 \newunicodechar{🙉}{{\emojifont 🙉}}
 \newunicodechar{❤}{{\emojifont ❤}}
+\newunicodechar{✅}{{\emojifont ✅}}
+\newunicodechar{✔}{{\emojifont ✔}}
+\newunicodechar{✓}{{\emojifont ✓}}
+\newunicodechar{☑}{{\emojifont ☑}}
+\newunicodechar{ϵ}{{\latinfont ϵ}}
+\newunicodechar{϶}{{\latinfont ϶}}
+\newunicodechar{Θ}{{\latinfont Θ}}
+\newunicodechar{ș}{{\latinfont ș}}
+\newunicodechar{Ș}{{\latinfont Ș}}
 \newunicodechar{️}{}
 \usepackage{geometry}
 \geometry{left=1.15in,right=1.15in,top=1.1in,bottom=1.2in}
@@ -59,10 +72,12 @@
 \cfoot{\thepage}
 \renewcommand{\headrulewidth}{0pt}
 \usepackage{hyperref}
+\usepackage{graphicx}
 \usepackage{xcolor}
 \definecolor{LinkBlue}{RGB}{26,78,132}
 \definecolor{Accent}{RGB}{196,64,50}
 \hypersetup{colorlinks=true, linkcolor=LinkBlue, urlcolor=LinkBlue}
+\setkeys{Gin}{width=\linewidth,keepaspectratio}
 \newcommand{\numhl}[1]{\textcolor{Accent}{\textbf{#1}}}
 \usepackage[most]{tcolorbox}
 \newtcolorbox{tweetquote}{
@@ -91,7 +106,48 @@
   bottom=5pt,
   borderline west={2pt}{0pt}{Accent}
 }
-\usepackage{longtable,booktabs}
+\usepackage{longtable,booktabs,array,calc,amssymb}
+\usepackage{listings}
+\definecolor{CodeComment}{RGB}{98,114,164}
+\definecolor{CodeKeyword}{RGB}{198,120,221}
+\definecolor{CodeString}{RGB}{152,195,121}
+\definecolor{CodeNumber}{RGB}{209,154,102}
+\definecolor{CodeText}{RGB}{40,44,52}
+\usepackage{fancyvrb}
+\usepackage{framed}
+\definecolor{shadecolor}{RGB}{248,248,248}
+\definecolor{CodeBg}{RGB}{248,248,248}
+\definecolor{CodeBorder}{RGB}{220,220,220}
+\lstdefinestyle{pythonstyle}{
+  language=Python,
+  backgroundcolor=\color{CodeBg},
+  basicstyle=\ttfamily\small\color{CodeText},
+  keywordstyle=\color{CodeKeyword}\bfseries,
+  stringstyle=\color{CodeString},
+  commentstyle=\color{CodeComment}\itshape,
+  numberstyle=\tiny\color{CodeNumber},
+  showstringspaces=false,
+  tabsize=2,
+  breaklines=true,
+  breakatwhitespace=true,
+  frame=single,
+  rulecolor=\color{CodeBorder},
+  framerule=0.4pt,
+  framesep=4pt,
+  xleftmargin=4pt,
+  xrightmargin=4pt
+}
+\lstset{style=pythonstyle}
+\DefineVerbatimEnvironment{Highlighting}{Verbatim}{fontsize=\small,breaklines=true,breakanywhere=true,commandchars=\\\{\}}
+\makeatletter
+\AtBeginDocument{%
+  \@ifundefined{Shaded}{%
+    \newenvironment{Shaded}{}{}%
+  }{%
+    \renewenvironment{Shaded}{\begin{tcolorbox}[colback=CodeBg,colframe=CodeBorder,boxrule=0.4pt,arc=2pt,left=6pt,right=6pt,top=4pt,bottom=4pt,breakable]}{\end{tcolorbox}}%
+  }%
+}
+\makeatother
 \usepackage{enumitem}
 \setlist{itemsep=0.3em, topsep=0.2em}
 \renewcommand{\labelitemi}{-}
@@ -99,6 +155,7 @@
 \setlength{\parindent}{0pt}
 \providecommand{\tightlist}{%
   \setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
+$highlighting-macros$
 \begin{document}
 $body$
 \end{document}

@@ -4,6 +4,8 @@ import asyncio
 import hashlib
 import json
 import re
+import shutil
+import subprocess
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from html import unescape
@@ -19,6 +21,28 @@ from loguru import logger
 from jarvis.config import RssConfig
 from jarvis.messaging.messenger import Messenger
 from jarvis.rss.pdf import render_digest_pdf
+
+_BROWSER_UA = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/121.0.0.0 Safari/537.36"
+)
+
+
+def _rss_headers(user_agent: str) -> dict[str, str]:
+    return {
+        "User-Agent": user_agent,
+        "Accept": "application/rss+xml, application/xml;q=0.9, */*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Cache-Control": "no-cache",
+        "Pragma": "no-cache",
+    }
+
+
+def _fallback_user_agent(user_agent: str) -> str:
+    if "Mozilla/5.0" in user_agent:
+        return user_agent
+    return _BROWSER_UA
 
 
 @dataclass(slots=True)
@@ -133,7 +157,7 @@ class RssService:
 
         state = _RssStateStore(self._state_path, self._config.max_ids_per_feed).load()
         timeout = aiohttp.ClientTimeout(total=self._config.timeout_seconds)
-        headers = {"User-Agent": self._config.user_agent}
+        headers = _rss_headers(self._config.user_agent)
         semaphore = asyncio.Semaphore(max(1, self._config.concurrency))
 
         async with aiohttp.ClientSession(timeout=timeout, headers=headers) as session:
@@ -194,12 +218,35 @@ class RssService:
             try:
                 async with session.get(url) as resp:
                     if resp.status >= 400:
-                        logger.warning("RSS fetch failed: {} HTTP {}", url, resp.status)
-                        return url, None
-                    content = await resp.read()
+                        content = None
+                        if resp.status in (403, 429):
+                            content = await _fetch_feed_with_user_agent(
+                                session,
+                                url,
+                                _fallback_user_agent(self._config.user_agent),
+                            )
+                        if not content:
+                            content = await _fetch_feed_via_curl(
+                                url,
+                                self._config.timeout_seconds,
+                                _fallback_user_agent(self._config.user_agent),
+                                resp.status,
+                            )
+                        if not content:
+                            logger.warning("RSS fetch failed: {} HTTP {}", url, resp.status)
+                            return url, None
+                    else:
+                        content = await resp.read()
             except Exception as exc:
-                logger.warning("RSS fetch error: {} ({})", url, exc)
-                return url, None
+                content = await _fetch_feed_via_curl(
+                    url,
+                    self._config.timeout_seconds,
+                    _fallback_user_agent(self._config.user_agent),
+                    exc,
+                )
+                if not content:
+                    logger.warning("RSS fetch error: {} ({})", url, exc)
+                    return url, None
 
         try:
             parsed = feedparser.parse(content)
@@ -401,6 +448,63 @@ async def _fetch_fulltext_from_url(
     return _clean_text(text)
 
 
+async def _fetch_feed_via_curl(
+    url: str,
+    timeout_seconds: int,
+    user_agent: str,
+    reason: int | Exception | None = None,
+) -> bytes | None:
+    if reason is None:
+        return None
+    if isinstance(reason, int) and reason not in (403, 429):
+        return None
+    if not shutil.which("curl"):
+        logger.warning("RSS curl fallback skipped (curl missing): {}", url)
+        return None
+    logger.warning("RSS fetch failed; trying curl fallback: {} ({})", url, reason)
+    cmd = [
+        "curl",
+        "-L",
+        "--max-time",
+        str(max(1, int(timeout_seconds))),
+        "-A",
+        user_agent,
+        "-H",
+        "Accept: application/rss+xml, application/xml;q=0.9, */*;q=0.8",
+        url,
+    ]
+    try:
+        result = await asyncio.to_thread(
+            subprocess.run,
+            cmd,
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+    except Exception as exc:
+        logger.warning("RSS curl fallback error: {} ({})", url, exc)
+        return None
+    if result.returncode != 0 or not result.stdout:
+        return None
+    logger.info("RSS fetch via curl fallback succeeded: {}", url)
+    return result.stdout
+
+
+async def _fetch_feed_with_user_agent(
+    session: aiohttp.ClientSession,
+    url: str,
+    user_agent: str,
+) -> bytes | None:
+    headers = _rss_headers(user_agent)
+    try:
+        async with session.get(url, headers=headers) as resp:
+            if resp.status >= 400:
+                return None
+            return await resp.read()
+    except Exception:
+        return None
+
+
 async def _resolve_wayback_snapshot(
     session: aiohttp.ClientSession,
     semaphore: asyncio.Semaphore,
@@ -598,7 +702,7 @@ def _format_digest(updates: Iterable[FeedUpdate], summary_max_chars: int) -> str
                 item.content_full or item.summary or item.title,
                 summary_max_chars,
             )
-            lines.append(f"- {item.title}")
+            lines.append(f"- {item.title}（{_format_item_date(item)}）")
             lines.append("  摘要：")
             for line in summary.splitlines():
                 lines.append(f"  {line}")
@@ -619,7 +723,7 @@ def _format_digest_markdown(updates: Iterable[FeedUpdate], summary_max_chars: in
                 item.content_full or item.summary or item.title,
                 summary_max_chars,
             )
-            lines.append(f"### {item.title}")
+            lines.append(f"### {item.title}（{_format_item_date(item)}）")
             lines.append("")
             for line in _summary_to_bullets(summary):
                 lines.append(line)
@@ -645,6 +749,16 @@ def _summary_to_bullets(summary: str) -> list[str]:
                 continue
         bullets.append(f"- {line}")
     return bullets
+
+
+def _format_item_date(item: RssItem) -> str:
+    if not item.published_at:
+        return "未知时间"
+    try:
+        local = item.published_at.astimezone()
+    except Exception:
+        local = item.published_at
+    return local.strftime("%Y-%m-%d")
 
 
 def _split_sentences(text: str) -> list[str]:

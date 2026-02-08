@@ -18,6 +18,8 @@ class ActiveTaskSnapshot:
     event_type: str
     started_at: datetime
     summary: str
+    session_id: str | None
+    chat_id: str | None
 
 
 class QueueWorker:
@@ -77,6 +79,8 @@ class QueueWorker:
                 event_type=str(event.type),
                 started_at=datetime.now(timezone.utc),
                 summary=_summarize_event(event),
+                session_id=_extract_session_id(event),
+                chat_id=_extract_chat_id(event),
             )
             async with self._lock:
                 if task_name:
@@ -96,6 +100,11 @@ def _summarize_event(event: Event) -> str:
     payload: dict[str, Any] = event.payload or {}
     if event.type == "command.task":
         return _truncate(str(payload.get("task") or ""))
+    if event.type == "command.compact":
+        session_id = payload.get("session_id")
+        if session_id is not None:
+            return _truncate(f"compact session_id={session_id}")
+        return "compact"
     if event.type == "telegram.command":
         raw = payload.get("raw_text")
         if raw:
@@ -109,6 +118,22 @@ def _summarize_event(event: Event) -> str:
         if text:
             return _truncate(str(text))
     return _truncate(str(payload.get("name") or payload.get("action") or event.type))
+
+
+def _extract_session_id(event: Event) -> str | None:
+    payload: dict[str, Any] = event.payload or {}
+    session_id = payload.get("session_id")
+    if session_id is None:
+        return None
+    return str(session_id)
+
+
+def _extract_chat_id(event: Event) -> str | None:
+    payload: dict[str, Any] = event.payload or {}
+    chat_id = payload.get("chat_id")
+    if chat_id is None:
+        return None
+    return str(chat_id)
 
 
 def _truncate(value: str, limit: int = 120) -> str:

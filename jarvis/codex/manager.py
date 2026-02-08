@@ -112,7 +112,7 @@ class CodexManager:
             logger.info("Extracted {} media item(s) from response.", len(media))
             for item in media:
                 logger.info(
-                    "Media item: type=%s path=%s",
+                    "Media item: type={} path={}",
                     item.get("type"),
                     item.get("path") or item.get("file"),
                 )

@@ -88,6 +88,7 @@ class JarvisApp:
             self._storage,
             self._prompt_builder,
             self._messenger,
+            self._memory,
         )
         self._task_worker = QueueWorker(
             self._task_pipeline.handle,

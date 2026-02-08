@@ -26,7 +26,8 @@ class HeartbeatRunner:
             self._write_state(last_hash=None, last_trigger_at=None)
             return None
 
-        normalized = _normalize_content(content)
+        cleaned, directives = _extract_directives(content)
+        normalized = _normalize_content(cleaned)
         if not normalized:
             self._write_state(last_hash=None, last_trigger_at=None)
             return None
@@ -34,12 +35,13 @@ class HeartbeatRunner:
         content_hash = _hash_content(normalized)
         state = self._read_state()
         last_hash = state.get("last_hash")
-        if last_hash == content_hash:
+        run_always = "run_always" in directives
+        if not run_always and last_hash == content_hash:
             self._write_state(last_hash=last_hash, last_trigger_at=state.get("last_trigger_at"))
             return None
 
         self._write_state(last_hash=content_hash, last_trigger_at=_utc_now())
-        return content.rstrip()
+        return cleaned.rstrip()
 
     def _read_heartbeat_content(self) -> str | None:
         for path in self._config.heartbeat_paths:
@@ -83,6 +85,18 @@ def _normalize_content(content: str) -> str:
     lines = [line.strip() for line in content.splitlines()]
     lines = [line for line in lines if line and not line.startswith("#")]
     return "\n".join(lines)
+
+
+def _extract_directives(content: str) -> tuple[str, set[str]]:
+    directives: set[str] = set()
+    cleaned_lines: list[str] = []
+    for line in content.splitlines():
+        stripped = line.strip()
+        if stripped.lower() in {"@run_always", "@always"}:
+            directives.add("run_always")
+            continue
+        cleaned_lines.append(line)
+    return "\n".join(cleaned_lines), directives
 
 
 def _hash_content(content: str) -> str:
